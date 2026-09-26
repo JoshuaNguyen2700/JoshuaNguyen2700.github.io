@@ -1,0 +1,884 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SLA Dashboard</title>
+<style>
+:root{
+  --red:#E6100D; --red-50:#fdeceb; --red-100:#f9c9c7;
+  --navy:#002048; --navy-80:#1c3a66; --navy-50:#e9eef6;
+  --black:#111111; --ink:#1b1f24; --muted:#5b6472; --line:#dfe3ea; --bg:#f3f5f8; --white:#ffffff;
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:"Segoe UI",system-ui,-apple-system,Arial,sans-serif;background:var(--bg);color:var(--ink);font-size:14px}
+button,select,input{font:inherit}
+
+/* Header */
+.top{background:var(--navy);color:var(--white);border-bottom:4px solid var(--red)}
+.top-inner{max-width:1480px;margin:0 auto;padding:18px 24px;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.top h1{margin:0;font-size:22px;font-weight:700}
+.top p{margin:4px 0 0;color:#c9d3e3;font-size:13px}
+.top-right{text-align:right}
+.pill{display:inline-block;background:var(--white);color:var(--navy);font-weight:700;border-radius:999px;padding:6px 14px;font-size:13px;white-space:nowrap}
+.asof{color:#c9d3e3;font-size:12px;margin-top:6px}
+
+main{max-width:1480px;margin:0 auto;padding:18px 24px 48px}
+.card{background:var(--white);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:16px}
+.card h2{margin:0 0 12px;font-size:16px;color:var(--black);display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.card h2 .sp{flex:1}
+
+/* Buttons */
+.btn{border:1px solid #c8cfda;background:var(--white);color:var(--black);padding:7px 14px;border-radius:7px;font-weight:600;cursor:pointer;white-space:nowrap}
+.btn:hover{border-color:var(--navy)}
+.btn.primary{background:var(--navy);border-color:var(--navy);color:var(--white)}
+.btn.primary:hover{background:var(--navy-80)}
+.btn.red{background:var(--red);border-color:var(--red);color:var(--white)}
+.btn.red:hover{filter:brightness(.92)}
+.btn.outline-red{color:var(--red);border-color:var(--red-100)}
+.btn.outline-red:hover{border-color:var(--red)}
+.btn.sm{padding:5px 10px;font-size:13px}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+
+/* Upload */
+.drop{border:2px dashed #8fa0bb;border-radius:10px;padding:22px;text-align:center;transition:background .15s,border-color .15s}
+.drop.over{border-color:var(--red);background:var(--red-50)}
+.drop strong{display:block;color:var(--black);font-size:15px}
+.drop small{color:var(--muted)}
+.drop .row{margin-top:12px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+.status{border-left:4px solid var(--navy);background:var(--navy-50);padding:10px 12px;margin-top:12px;border-radius:0 6px 6px 0}
+.status.err{border-left-color:var(--red);background:var(--red-50)}
+details.diag{margin-top:10px}
+details.diag summary{cursor:pointer;font-weight:600;color:var(--black)}
+.diag table{margin-top:8px}
+
+/* KPIs */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:16px}
+.kpi{background:var(--white);border:1px solid var(--line);border-left:5px solid var(--navy);border-radius:10px;padding:12px 16px;cursor:pointer;text-align:left;color:inherit}
+.kpi:hover{box-shadow:0 1px 6px rgba(0,32,72,.12)}
+.kpi.red{border-left-color:var(--red)}
+.kpi.black{border-left-color:var(--black)}
+.kpi.active{outline:2px solid var(--navy);outline-offset:-1px}
+.kpi.red.active{outline-color:var(--red)}
+.kpi .lbl{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)}
+.kpi .val{font-size:28px;font-weight:800;color:var(--black);margin-top:2px}
+.kpi.red .val{color:var(--red)}
+.kpi .sub{font-size:12px;color:var(--muted);margin-top:2px}
+
+/* Filters */
+.filters{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.filters select,.filters input{padding:7px 9px;border:1px solid #c8cfda;border-radius:7px;background:var(--white);color:var(--ink);max-width:230px}
+.filters select.on,.filters input.on{border-color:var(--navy);background:var(--navy-50);font-weight:600}
+.filters label{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px}
+.filters .search{min-width:240px}
+.ms{position:relative;display:inline-block}
+.ms-btn{position:relative;min-width:170px;max-width:230px;padding:7px 28px 7px 9px;border:1px solid #c8cfda;border-radius:7px;background:var(--white);color:var(--ink);text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
+.ms-btn::after{content:'▾';position:absolute;right:9px;top:50%;transform:translateY(-50%);color:var(--muted)}
+.ms.on .ms-btn{border-color:var(--navy);background:var(--navy-50);font-weight:600}
+.ms-pop{position:absolute;z-index:20;top:calc(100% + 4px);left:0;width:290px;background:var(--white);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(0,32,72,.18);padding:8px}
+.filters .ms-q{width:100%;max-width:none}
+.ms-act{display:flex;gap:6px;margin:8px 0 6px}
+.ms-list{max-height:300px;overflow:auto}
+.filters .ms-list label{display:flex;align-items:center;gap:8px;padding:5px 6px;border-radius:5px;cursor:pointer;font-size:13px;color:var(--ink)}
+.ms-list label:hover{background:var(--bg)}
+.ms-list label .muted{margin-left:auto;font-size:12px}
+.filters .ms-list input{padding:0;accent-color:var(--navy);width:15px;height:15px;flex:none}
+@media (max-width:640px){ .ms,.ms-btn{width:100%;max-width:100%} .ms-pop{width:100%} }
+
+/* Tables */
+.tbl-wrap{overflow:auto;max-height:72vh;border:1px solid var(--line);border-radius:8px;background:var(--white)}
+table{border-collapse:separate;border-spacing:0;width:100%;font-size:13px}
+th{position:sticky;top:0;z-index:2;background:var(--navy);color:var(--white);text-align:left;padding:0 10px;height:34px;white-space:nowrap;font-weight:600}
+thead tr:nth-child(2) th{top:34px;background:var(--navy-80);font-weight:500;font-size:12px}
+th.g-br{background:var(--red)}
+thead tr:nth-child(2) th.c-br{background:#b90d0b}
+th.g-tot{background:var(--black)}
+thead tr:nth-child(2) th.c-tot{background:#2a2a2a}
+th.num,td.num{text-align:right}
+td{padding:6px 10px;border-bottom:1px solid #eef0f4;white-space:nowrap}
+tbody tr:hover td{background:#f7f9fc}
+tr.d0 td{font-weight:600}
+tr.d0 td:first-child{color:var(--black)}
+tr.sel td{background:#fff3cd !important}
+tfoot td{position:sticky;bottom:0;z-index:1;background:#f0f2f6;font-weight:800;border-top:2px solid var(--black);color:var(--black)}
+.tog{display:inline-block;width:18px;height:18px;border:1px solid #9aa6b8;border-radius:3px;background:var(--white);font-size:13px;line-height:15px;padding:0;cursor:pointer;margin-right:6px;color:var(--navy);text-align:center;vertical-align:middle}
+.tog:hover{border-color:var(--navy)}
+.tog-sp{display:inline-block;width:24px}
+.cnt{background:none;border:0;color:var(--navy);font-weight:inherit;cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px;padding:0}
+.cnt:hover{text-decoration:underline}
+td.br .cnt{color:var(--red)}
+.muted{color:var(--muted);font-weight:400}
+.subj{max-width:380px;overflow:hidden;text-overflow:ellipsis}
+.badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:700}
+.badge.met{background:var(--navy-50);color:var(--navy)}
+.badge.br{background:var(--red-50);color:var(--red)}
+th.sortable{cursor:pointer;user-select:none}
+th.sortable:hover{text-decoration:underline}
+.chip{display:inline-flex;align-items:center;gap:6px;background:#fff3cd;border:1px solid #f0d58a;border-radius:999px;padding:3px 6px 3px 12px;font-size:13px;font-weight:600;color:var(--black)}
+.chip button{border:0;background:var(--black);color:var(--white);border-radius:999px;width:20px;height:20px;cursor:pointer;line-height:18px;padding:0}
+.hint{color:var(--muted);font-size:12px;margin:8px 0 0}
+.toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+.toolbar select{padding:6px 9px;border:1px solid #c8cfda;border-radius:7px;background:var(--white)}
+.empty{text-align:center;color:var(--muted);padding:40px 16px}
+.more{text-align:center;margin-top:10px}
+[hidden]{display:none !important}
+@media (max-width:640px){
+  main,.top-inner{padding-left:16px;padding-right:16px}
+  .top-right{text-align:left}
+  .filters select,.filters input,.filters .search{max-width:100%;width:100%;min-width:0}
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="top-inner">
+    <div>
+      <h1>SLA Dashboard</h1>
+      <p>Customer case response times vs. SLA target: average elapsed time and case counts</p>
+    </div>
+    <div class="top-right">
+      <span class="pill" id="pill">0 cases</span>
+      <div class="asof" id="asof">No data loaded</div>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section class="card">
+    <div class="drop" id="drop">
+      <strong>Drop the Salesforce SLA export here</strong>
+      <small>.xlsx, .xls or .csv. Uploading a file clears the previous data and filters.</small>
+      <div class="row">
+        <button class="btn primary" id="pick">Choose files</button>
+        <button class="btn outline-red" id="clear">Clear all data</button>
+      </div>
+      <input type="file" id="file" accept=".xlsx,.xlsm,.xls,.csv" multiple hidden>
+    </div>
+    <div class="status" id="status">Ready. Choose or drop an export file.</div>
+    <details class="diag" id="diag" hidden>
+      <summary>Loaded files</summary>
+      <div class="tbl-wrap" style="max-height:none"><table id="diagTbl"></table></div>
+    </details>
+  </section>
+
+  <div id="emptyState" class="card empty">
+    Load a Salesforce SLA export (for example <b>SLA's - L6W - Customers - Ground DV</b>) to see its report. Data is only kept while this page is open; closing or refreshing it clears everything.
+  </div>
+
+  <div id="dash" hidden>
+    <div class="kpis" id="kpis"></div>
+
+    <section class="card">
+      <div class="filters" id="filters">
+        <!-- selects injected -->
+        <label>From <input type="date" id="from"></label>
+        <label>To <input type="date" id="to"></label>
+        <input type="search" class="search" id="q" placeholder="Search case #, subject, company, contact">
+        <button class="btn sm" id="resetF">Clear filters</button>
+        <button class="btn red sm" id="export">Export to Excel</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>SLA matrix <span class="sp"></span>
+        <select id="hier" aria-label="Row grouping"></select>
+        <button class="btn sm" id="expand">+ Expand level</button>
+        <button class="btn sm" id="collapse">− Collapse all</button>
+      </h2>
+      <div class="tbl-wrap"><table id="matrix"></table></div>
+      <p class="hint">Click ⊞ to drill down. Click any case count to list those cases below.</p>
+    </section>
+
+    <section class="card" id="casesCard">
+      <h2>Cases <span id="selChip"></span><span class="sp"></span><span class="muted" id="caseCount"></span></h2>
+      <div class="tbl-wrap"><table id="cases"></table></div>
+      <div class="more" id="moreWrap" hidden><button class="btn sm" id="more">Show more</button></div>
+    </section>
+  </div>
+</main>
+
+<script>
+/*__SHEETJS__*/
+</script>
+<script>
+(function(){
+'use strict';
+const $ = s => document.querySelector(s);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmtInt = n => Number(n).toLocaleString('en-US');
+const norm = s => String(s == null ? '' : s).toLowerCase().replace(/[^a-z0-9]/g, '');
+const pad = n => String(n).padStart(2, '0');
+const cmpText = (a, b) => String(a).localeCompare(String(b), undefined, {numeric:true, sensitivity:'base'});
+const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+/* ---------- Column mapping (Salesforce report headers) ---------- */
+const FIELDS = {
+  opened:'Date/Time Opened', closed:'Date/Time Closed', id:'Case Number', origin:'Case Origin',
+  status:'Status', owner:'Case Owner', company:'Company Name', contact:'Contact Name', email:'Web Email',
+  subject:'Subject', parent:'Ultimate Parent', segment:'Customer Segment', target:'Target Date',
+  completion:'Completion Date', violation:'Violation', targetMins:'Target Response (Mins)',
+  elapsed:'Elapsed Time (Mins)', week:'Creation Week', sla:'SLA Breached?'
+};
+const REQUIRED = ['opened', 'id', 'elapsed'];
+const SLA_MET = '1. SLA Met', SLA_BREACHED = '2. SLA Breached';
+
+/* ---------- Value parsing ---------- */
+const MDY = /^(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?:,?\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([AaPp][Mm])?)?$/;
+const ISO = /^(\d{4})-(\d{2})-(\d{2})(?:[T\s](\d{2}):(\d{2})(?::(\d{2}))?)?/;
+function toTime(v){
+  if (v == null || v === '') return null;
+  if (v instanceof Date) return isNaN(v) ? null : v.getTime();
+  if (typeof v === 'number'){
+    // Excel serial date -> local wall-clock time
+    if (v < 1 || v > 2958465) return null;
+    const u = new Date(Math.round((v - 25569) * 864e5));
+    return new Date(u.getUTCFullYear(), u.getUTCMonth(), u.getUTCDate(), u.getUTCHours(), u.getUTCMinutes(), u.getUTCSeconds()).getTime();
+  }
+  const s = String(v).trim();
+  let m = s.match(MDY);
+  if (m){
+    let y = +m[3]; if (y < 100) y += 2000;
+    let h = +(m[4] || 0);
+    const ap = m[7] && m[7].toUpperCase();
+    if (ap === 'PM' && h < 12) h += 12;
+    if (ap === 'AM' && h === 12) h = 0;
+    const d = new Date(y, +m[1] - 1, +m[2], h, +(m[5] || 0), +(m[6] || 0));
+    return isNaN(d) ? null : d.getTime();
+  }
+  m = s.match(ISO);
+  if (m){
+    const d = new Date(+m[1], +m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0));
+    return isNaN(d) ? null : d.getTime();
+  }
+  if (/^\d+(\.\d+)?$/.test(s)) return toTime(parseFloat(s));
+  return null;
+}
+function toNum(v){
+  if (v == null || v === '') return null;
+  if (typeof v === 'number') return v;
+  const n = parseFloat(String(v).replace(/,/g, ''));
+  return isNaN(n) ? null : n;
+}
+function toBool(v){
+  if (v == null || v === '') return null;
+  if (typeof v === 'boolean') return v;
+  if (typeof v === 'number') return v !== 0;
+  const s = String(v).trim().toLowerCase();
+  return s === 'true' || s === '1' || s === 'yes';
+}
+const toStr = v => v == null ? '' : String(v).trim();
+function isoWeek(t){
+  const d = new Date(t);
+  const x = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const day = x.getUTCDay() || 7;
+  x.setUTCDate(x.getUTCDate() + 4 - day);
+  const y0 = new Date(Date.UTC(x.getUTCFullYear(), 0, 1));
+  return Math.ceil(((x - y0) / 864e5 + 1) / 7);
+}
+
+/* ---------- Formatting ---------- */
+// Matches the Power BI measure: ROUND(AVERAGE(mins),0) shown as "Hh MMm"
+function fmtHM(mins){
+  if (mins == null || isNaN(mins)) return '';
+  const t = Math.round(mins);
+  return Math.floor(t / 60) + 'h ' + pad(t % 60) + 'm';
+}
+function fmtDT(t){
+  if (t == null) return '';
+  const d = new Date(t);
+  let h = d.getHours(); const ap = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12;
+  return (d.getMonth() + 1) + '/' + d.getDate() + '/' + d.getFullYear() + ' ' + h + ':' + pad(d.getMinutes()) + ' ' + ap;
+}
+const fmtPct = (a, b) => b ? (a / b * 100).toFixed(1) + '%' : '';
+const shortDate = t => { const d = new Date(t); return MONTHS[d.getMonth()].slice(0, 3) + ' ' + d.getDate(); };
+const isBreach = k => /breach/i.test(k);
+const slaLabel = k => String(k).replace(/^\s*\d+\.\s*/, '');
+
+const monthKey = t => { const d = new Date(t); return d.getFullYear() + '-' + pad(d.getMonth() + 1); };
+const monthLabel = k => { const [y, m] = k.split('-'); return MONTHS[+m - 1] + ' ' + y; };
+const dayKey = t => { const d = new Date(t); return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); };
+const dayLabel = k => { const [y, m, dd] = k.split('-'); const d = new Date(+y, +m - 1, +dd); return MONTHS[d.getMonth()].slice(0, 3) + ' ' + d.getDate() + ' (' + DAYS[d.getDay()] + ')'; };
+function weekKey(r){
+  const d = new Date(r.opened); let y = d.getFullYear();
+  if (r.week >= 52 && d.getMonth() === 0) y--;
+  if (r.week === 1 && d.getMonth() === 11) y++;
+  return y + '-W' + pad(r.week);
+}
+const weekNum = k => +k.split('-W')[1];
+
+/* ---------- State ---------- */
+const state = {
+  rows: [], files: [], slaKeys: [],
+  filters: {}, from: '', to: '', fromT: null, toT: null, q: '',
+  hier: 'month', expanded: new Set(), sel: null,
+  sort: {k: 'opened', dir: -1}, limit: 200, paths: []
+};
+
+const FILTERS = [
+  {k:'month',   all:'All months',           noun:'months',           get:r => monthKey(r.opened), text:monthLabel},
+  {k:'week',    all:'All weeks',            noun:'weeks',            get:weekKey, text:k => 'Week ' + weekNum(k)},
+  {k:'owner',   all:'All case owners',      noun:'case owners',      get:r => r.owner || '(Blank)'},
+  {k:'sla',     all:'SLA met & breached',   noun:'SLA results',      get:r => r.sla, text:slaLabel},
+  {k:'segment', all:'All segments',         noun:'segments',         get:r => r.segment || '(Blank)'},
+  {k:'parent',  all:'All ultimate parents', noun:'ultimate parents', get:r => r.parent || '(Blank)'},
+  {k:'company', all:'All companies',        noun:'companies',        get:r => r.company || '(Blank)'},
+  {k:'status',  all:'All statuses',         noun:'statuses',         get:r => r.status || '(Blank)'}
+];
+// Each filter holds an array of chosen values; empty = all
+function blankFilters(){ FILTERS.forEach(f => state.filters[f.k] = []); }
+blankFilters();
+
+const LV = {
+  month:   {name:'Month', key:r => monthKey(r.opened), label:monthLabel},
+  day:     {name:'Day', key:r => dayKey(r.opened), label:dayLabel},
+  week:    {name:'Week', key:weekKey, label:(k, rows) => {
+             let lo = Infinity, hi = -Infinity;
+             for (const r of rows){ if (r.opened < lo) lo = r.opened; if (r.opened > hi) hi = r.opened; }
+             return 'Week ' + weekNum(k) + ' <span class="muted">' + esc(shortDate(lo) + ' – ' + shortDate(hi)) + '</span>';
+           }, html:true},
+  owner:   {name:'Case Owner', key:r => r.owner || '(Blank)'},
+  segment: {name:'Customer Segment', key:r => r.segment || '(Blank)'},
+  parent:  {name:'Ultimate Parent', key:r => r.parent || '(Blank)'},
+  company: {name:'Company', key:r => r.company || '(Blank)'},
+  status:  {name:'Status', key:r => r.status || '(Blank)'},
+  case:    {name:'Case Number', key:r => r.id, label:(k, rows) =>
+             esc(k) + ' <span class="muted">' + esc((rows[0].subject || '').slice(0, 70)) + '</span>', html:true}
+};
+const HIERS = {
+  month:    {label:'Month › Day › Case Owner › Case (Power BI view)', levels:['month','day','owner','case']},
+  week:     {label:'Week › Case Owner › Case', levels:['week','owner','case']},
+  owner:    {label:'Case Owner › Month › Case', levels:['owner','month','case']},
+  customer: {label:'Segment › Ultimate Parent › Company › Case', levels:['segment','parent','company','case']},
+  status:   {label:'Status › Case Owner › Case', levels:['status','owner','case']}
+};
+
+/* ---------- File reading ---------- */
+async function readFile(file){
+  const buf = await file.arrayBuffer();
+  let wb;
+  // Salesforce ".xls" exports are really HTML tables in a legacy charset (ISO-8859-1).
+  // Decode them ourselves so accented text (é, ç, á) is not garbled.
+  const head = new TextDecoder('windows-1252').decode(new Uint8Array(buf, 0, Math.min(buf.byteLength, 2048)));
+  if (/^\s*</.test(head) && /<(table|html|head)/i.test(head)){
+    const cs = (head.match(/charset=["']?([\w-]+)/i) || [])[1] || 'windows-1252';
+    let text;
+    try { text = new TextDecoder(cs).decode(buf); } catch (e){ text = new TextDecoder('windows-1252').decode(buf); }
+    wb = XLSX.read(text, {type:'string', cellDates:false});
+  } else {
+    wb = XLSX.read(buf, {type:'array', cellDates:false});
+  }
+  const out = {rows:[], sheets:[], skipped:0, blankSla:0, derived:0, missing:null};
+  for (const sn of wb.SheetNames){
+    const aoa = XLSX.utils.sheet_to_json(wb.Sheets[sn], {header:1, raw:true, defval:null, blankrows:false});
+    let hi = -1, map = null, best = null;
+    for (let i = 0; i < Math.min(aoa.length, 40); i++){
+      const hdr = (aoa[i] || []).map(norm), m = {};
+      for (const [k, label] of Object.entries(FIELDS)){ const j = hdr.indexOf(norm(label)); if (j >= 0) m[k] = j; }
+      if (REQUIRED.every(k => k in m)){ hi = i; map = m; break; }
+      if (!best || Object.keys(m).length > Object.keys(best).length) best = m;
+    }
+    if (hi < 0){
+      // Remember which required columns the closest-looking header row lacked, for the error message
+      const miss = REQUIRED.filter(k => !best || !(k in best)).map(k => FIELDS[k]);
+      if (!out.missing || miss.length < out.missing.length) out.missing = miss;
+      continue;
+    }
+    // Salesforce "formatted" exports group rows (e.g. by Creation Week › Region › SLA Breached?):
+    // the group value is only written on a group's first row, with Subtotal rows in between.
+    // The grouping columns are the header cells before the first blank spacer column.
+    const hdrRow = aoa[hi] || [];
+    const groupCols = [];
+    if (aoa.some(r => r && r.some(v => v === 'Subtotal' || v === 'Grand Total'))){
+      let j = hdrRow.findIndex(v => v != null && v !== '');
+      for (; j >= 0 && j < hdrRow.length && hdrRow[j] != null && hdrRow[j] !== ''; j++) groupCols.push(j);
+      if (groupCols.length === hdrRow.filter(v => v != null && v !== '').length) groupCols.length = 0; // no spacer: not grouped
+    }
+    const carry = {};
+    let n = 0;
+    for (let i = hi + 1; i < aoa.length; i++){
+      let a = aoa[i]; if (!a) continue;
+      const g0 = k => map[k] == null ? null : a[map[k]];
+      const opened = toTime(g0('opened')), id = toStr(g0('id'));
+      // Same as Power BI "Removed Errors": drop rows without a valid Date/Time Opened (report footers, subtotals etc.)
+      if (opened == null || !id){ if (a.some(v => v != null && v !== '')) out.skipped++; continue; }
+      if (groupCols.length){
+        a = a.slice();
+        for (const j of groupCols){ if (a[j] == null || a[j] === '') a[j] = carry[j]; else carry[j] = a[j]; }
+      }
+      const g = k => map[k] == null ? null : a[map[k]];
+      const elapsed = toNum(g('elapsed')), targetMins = toNum(g('targetMins')), violation = toBool(g('violation'));
+      let sla = toStr(g('sla'));
+      if (!sla && !('sla' in map)){
+        // Export has no "SLA Breached?" column: derive it from Violation, else Elapsed vs Target
+        if (violation != null) sla = violation ? SLA_BREACHED : SLA_MET;
+        else if (elapsed != null && targetMins != null) sla = elapsed > targetMins ? SLA_BREACHED : SLA_MET;
+        if (sla) out.derived++;
+      }
+      // The Power BI visual excludes blank "SLA Breached?" values
+      if (!sla){ out.blankSla++; continue; }
+      const wk = toNum(g('week'));
+      out.rows.push({
+        id, opened, closed:toTime(g('closed')), origin:toStr(g('origin')), status:toStr(g('status')),
+        owner:toStr(g('owner')), company:toStr(g('company')), contact:toStr(g('contact')), email:toStr(g('email')),
+        subject:toStr(g('subject')), parent:toStr(g('parent')), segment:toStr(g('segment')),
+        target:toTime(g('target')), completion:toTime(g('completion')), violation, targetMins, elapsed,
+        week: wk == null ? isoWeek(opened) : Math.round(wk), sla, file:file.name
+      });
+      n++;
+    }
+    out.sheets.push(sn + ' (' + fmtInt(n) + ' rows' + (groupCols.length ? ', grouped report' : '') + ')');
+  }
+  return out;
+}
+
+async function loadFiles(list){
+  const files = [...list].filter(f => /\.(xlsx|xlsm|xls|csv)$/i.test(f.name));
+  if (!files.length){ setStatus('No Excel files in that selection. Use .xlsx, .xls or .csv.', true); return; }
+  setStatus('Reading ' + files.length + ' file(s)…');
+  // Every upload starts fresh: the previous report is discarded, never merged.
+  // Files chosen together in one upload are combined (duplicate case numbers kept once).
+  const byId = new Map();
+  const loaded = [];
+  let added = 0, replaced = 0, derived = 0;
+  const errs = [];
+  for (const f of files){
+    try {
+      const res = await readFile(f);
+      if (!res.rows.length){
+        errs.push(f.name + ': ' + (res.missing && res.missing.length
+          ? 'missing column(s) ' + res.missing.join(', ')
+          : 'no case rows found') + '. Is this the Salesforce SLA export?');
+        continue;
+      }
+      for (const r of res.rows){ if (byId.has(r.id)) replaced++; else added++; byId.set(r.id, r); }
+      derived += res.derived;
+      const i = loaded.findIndex(x => x.name === f.name);
+      if (i >= 0) loaded.splice(i, 1);
+      loaded.push({name:f.name, sheets:res.sheets.join(', '), rows:res.rows.length, skipped:res.skipped, blankSla:res.blankSla, loaded:Date.now()});
+    } catch (e){
+      errs.push(f.name + ': ' + (e && e.message || e));
+    }
+  }
+  if (!added && !replaced){
+    // Nothing usable: keep whatever report was already showing
+    setStatus('Could not load. ' + errs.join(' | '), true);
+    return;
+  }
+  state.rows = [...byId.values()];
+  state.files = loaded;
+  onDataChanged();
+  let msg = 'Previous data cleared. Showing ' + loaded.map(f => f.name).join(', ') + ': ' + fmtInt(state.rows.length) + ' cases.';
+  if (replaced) msg += ' ' + fmtInt(replaced) + ' duplicate case number(s) across the files were counted once.';
+  if (derived) msg += ' This file has no "SLA Breached?" column, so SLA Met/Breached was worked out from Violation (or Elapsed vs Target) for ' + fmtInt(derived) + ' case(s).';
+  if (errs.length) msg += ' Skipped: ' + errs.join(' | ');
+  setStatus(msg, errs.length > 0);
+}
+
+/* ---------- No saved data ----------
+   Data lives only in memory, so closing or refreshing the page clears it.
+   Earlier versions saved the last upload in the browser; delete any leftover copy. */
+function purgeSavedData(){ try { indexedDB.deleteDatabase('sla-dashboard'); } catch (e){} }
+
+/* ---------- Filtering ---------- */
+const searchCache = new WeakMap();
+function passes(r, except){
+  for (const f of FILTERS){
+    if (f.k === except) continue;
+    const v = state.filters[f.k];
+    if (v.length && v.indexOf(f.get(r)) < 0) return false;
+  }
+  if (state.fromT != null && r.opened < state.fromT) return false;
+  if (state.toT != null && r.opened >= state.toT) return false;
+  if (state.q){
+    let s = searchCache.get(r);
+    if (!s){ s = [r.id, r.subject, r.company, r.contact, r.email, r.owner, r.parent].join(' ').toLowerCase(); searchCache.set(r, s); }
+    if (s.indexOf(state.q) < 0) return false;
+  }
+  return true;
+}
+const filteredRows = () => state.rows.filter(r => passes(r));
+
+function stats(rows){
+  const s = {n:0, sum:0, cnt:0, met:0, by:{}};
+  for (const r of rows){
+    s.n++;
+    if (!isBreach(r.sla)) s.met++;
+    let b = s.by[r.sla]; if (!b) b = s.by[r.sla] = {n:0, sum:0, cnt:0};
+    b.n++;
+    if (r.elapsed != null){ s.sum += r.elapsed; s.cnt++; b.sum += r.elapsed; b.cnt++; }
+  }
+  return s;
+}
+const avg = o => o && o.cnt ? o.sum / o.cnt : null;
+
+function group(rows, lv){
+  const m = new Map();
+  for (const r of rows){ const k = lv.key(r); let a = m.get(k); if (!a) m.set(k, a = []); a.push(r); }
+  return [...m.keys()].sort(cmpText).map(k => ({key:k, rows:m.get(k)}));
+}
+
+/* ---------- Rendering ---------- */
+function onDataChanged(){
+  state.slaKeys = [...new Set(state.rows.map(r => r.sla))].sort(cmpText);
+  state.sel = null; state.limit = 200;
+  blankFilters();
+  state.from = state.to = state.q = ''; state.fromT = state.toT = null;
+  $('#from').value = $('#to').value = $('#q').value = '';
+  state.expanded.clear();
+  renderAll();
+}
+
+function renderAll(){
+  const has = state.rows.length > 0;
+  $('#dash').hidden = !has;
+  $('#emptyState').hidden = has;
+  renderHeader();
+  renderDiag();
+  if (!has) return;
+  const rows = filteredRows();
+  renderFilters();
+  renderKpis(rows);
+  renderMatrix(rows);
+  renderCases(rows);
+}
+
+function renderHeader(){
+  $('#pill').textContent = fmtInt(state.rows.length) + ' cases';
+  if (!state.rows.length){ $('#asof').textContent = 'No data loaded'; return; }
+  let lo = Infinity, hi = -Infinity;
+  for (const r of state.rows){ if (r.opened < lo) lo = r.opened; if (r.opened > hi) hi = r.opened; }
+  const names = state.files.map(f => f.name);
+  $('#asof').textContent = (names.length === 1 ? names[0] : names.length + ' files') + ' · opened ' + fmtDT(lo).split(' ')[0] + ' to ' + fmtDT(hi);
+  $('#asof').title = names.join('\n');
+}
+
+function renderDiag(){
+  $('#diag').hidden = !state.files.length;
+  $('#diagTbl').innerHTML = '<thead><tr><th>File</th><th>Sheets used</th><th class="num">Case rows</th><th class="num">Skipped non-data rows</th><th class="num">Blank SLA (excluded)</th><th>Loaded</th></tr></thead><tbody>' +
+    state.files.map(f => '<tr><td>' + esc(f.name) + '</td><td>' + esc(f.sheets) + '</td><td class="num">' + fmtInt(f.rows) + '</td><td class="num">' + fmtInt(f.skipped) + '</td><td class="num">' + fmtInt(f.blankSla) + '</td><td>' + esc(fmtDT(f.loaded)) + '</td></tr>').join('') + '</tbody>';
+}
+
+function renderFilters(){
+  const host = $('#filters'), anchor = host.querySelector('label');
+  for (const f of FILTERS) renderMulti(f, host, anchor);
+  $('#from').classList.toggle('on', !!state.from);
+  $('#to').classList.toggle('on', !!state.to);
+  $('#q').classList.toggle('on', !!state.q);
+}
+
+// Checkbox dropdown filter: tick one value or several
+function renderMulti(f, host, anchor){
+  let box = document.getElementById('f-' + f.k);
+  if (!box){
+    box = document.createElement('div');
+    box.id = 'f-' + f.k; box.className = 'ms';
+    box.innerHTML = '<button type="button" class="ms-btn" aria-haspopup="true"></button>' +
+      '<div class="ms-pop" hidden><input type="search" class="ms-q" placeholder="Search ' + esc(f.noun) + '">' +
+      '<div class="ms-act"><button type="button" class="btn sm" data-a="all">Select all</button><button type="button" class="btn sm" data-a="none">Clear</button></div>' +
+      '<div class="ms-list"></div></div>';
+    host.insertBefore(box, anchor);
+    const pop = box.querySelector('.ms-pop'), q = box.querySelector('.ms-q');
+    box.querySelector('.ms-btn').addEventListener('click', () => { pop.hidden = !pop.hidden; if (!pop.hidden) q.focus(); });
+    q.addEventListener('input', () => filterMsList(box));
+    box.querySelector('.ms-list').addEventListener('change', e => {
+      const cb = e.target;
+      if (!cb || cb.type !== 'checkbox') return;
+      const cur = state.filters[f.k];
+      state.filters[f.k] = cb.checked ? cur.concat(cb.value) : cur.filter(x => x !== cb.value);
+      state.limit = 200; renderAll();
+    });
+    box.querySelector('.ms-act').addEventListener('click', e => {
+      const a = e.target.closest('[data-a]'); if (!a) return;
+      // "Select all" adds every value currently visible in the (searched) list
+      const visible = [...box.querySelectorAll('.ms-list label:not([hidden]) input')].map(i => i.value);
+      state.filters[f.k] = a.dataset.a === 'none' ? [] : [...new Set(state.filters[f.k].concat(visible))];
+      state.limit = 200; renderAll();
+    });
+  }
+  const counts = new Map();
+  for (const r of state.rows){ if (!passes(r, f.k)) continue; const v = f.get(r); counts.set(v, (counts.get(v) || 0) + 1); }
+  const cur = state.filters[f.k];
+  cur.forEach(k => { if (!counts.has(k)) counts.set(k, 0); });
+  const list = box.querySelector('.ms-list'), top = list.scrollTop;
+  list.innerHTML = [...counts.keys()].sort(cmpText).map(k =>
+    '<label><input type="checkbox" value="' + esc(k) + '"' + (cur.includes(k) ? ' checked' : '') + '><span>' + esc(f.text ? f.text(k) : k) + '</span><span class="muted">' + fmtInt(counts.get(k)) + '</span></label>').join('');
+  list.scrollTop = top;
+  filterMsList(box);
+  const b = box.querySelector('.ms-btn');
+  b.textContent = !cur.length ? f.all : cur.length === 1 ? (f.text ? f.text(cur[0]) : cur[0]) : cur.length + ' ' + f.noun + ' selected';
+  b.title = cur.join('\n');
+  box.classList.toggle('on', cur.length > 0);
+}
+function filterMsList(box){
+  const q = box.querySelector('.ms-q').value.trim().toLowerCase();
+  box.querySelectorAll('.ms-list label').forEach(l => { l.hidden = !!q && l.textContent.toLowerCase().indexOf(q) < 0; });
+}
+
+function renderKpis(rows){
+  const s = stats(rows);
+  const metKeys = state.slaKeys.filter(k => !isBreach(k)), brKeys = state.slaKeys.filter(isBreach);
+  const sub = keys => keys.reduce((a, k) => { const b = s.by[k]; if (b){ a.n += b.n; a.sum += b.sum; a.cnt += b.cnt; } return a; }, {n:0, sum:0, cnt:0});
+  const met = sub(metKeys), br = sub(brKeys);
+  const f = state.filters.sla;
+  const onlyMet = f.length > 0 && f.every(k => !isBreach(k)), onlyBr = f.length > 0 && f.every(isBreach);
+  $('#kpis').innerHTML =
+    '<button class="kpi black' + (!f.length ? ' active' : '') + '" data-sla="all"><div class="lbl">Total cases</div><div class="val">' + fmtInt(s.n) + '</div><div class="sub">Click to show all</div></button>' +
+    '<button class="kpi' + (onlyMet ? ' active' : '') + '" data-sla="met"><div class="lbl">SLA met</div><div class="val">' + fmtInt(met.n) + '</div><div class="sub">' + (fmtPct(met.n, s.n) || '–') + ' of cases · avg ' + (fmtHM(avg(met)) || '–') + '</div></button>' +
+    '<button class="kpi red' + (onlyBr ? ' active' : '') + '" data-sla="br"><div class="lbl">SLA breached</div><div class="val">' + fmtInt(br.n) + '</div><div class="sub">' + (fmtPct(br.n, s.n) || '–') + ' of cases · avg ' + (fmtHM(avg(br)) || '–') + '</div></button>' +
+    '<button class="kpi" data-sla=""><div class="lbl">Avg elapsed time</div><div class="val">' + (fmtHM(avg(s)) || '–') + '</div><div class="sub">All cases in the current filter</div></button>';
+}
+
+function statCells(s, pathIdx){
+  let h = '';
+  for (const k of state.slaKeys){
+    const b = s.by[k], cls = isBreach(k) ? 'br' : 'met';
+    h += '<td class="num ' + cls + '">' + (b ? fmtHM(avg(b)) : '') + '</td>';
+    h += '<td class="num ' + cls + '">' + (b ? cntBtn(b.n, pathIdx, k) : '') + '</td>';
+  }
+  h += '<td class="num"><b>' + fmtHM(avg(s)) + '</b></td><td class="num"><b>' + cntBtn(s.n, pathIdx, '') + '</b></td><td class="num">' + fmtPct(s.met, s.n) + '</td>';
+  return h;
+}
+const cntBtn = (n, p, k) => '<button class="cnt" data-p="' + p + '" data-k="' + esc(k) + '">' + fmtInt(n) + '</button>';
+
+function renderMatrix(rows){
+  const levels = HIERS[state.hier].levels.map(k => LV[k]);
+  const keys = state.slaKeys;
+  state.paths = [[]];
+  let h = '<thead><tr><th rowspan="2">' + esc(levels.map(l => l.name).join(' › ')) + '</th>';
+  for (const k of keys) h += '<th colspan="2" class="' + (isBreach(k) ? 'g-br' : '') + '">' + esc(slaLabel(k)) + '</th>';
+  h += '<th colspan="3" class="g-tot">Total</th></tr><tr>';
+  for (const k of keys){ const c = isBreach(k) ? 'c-br' : ''; h += '<th class="num ' + c + '">Avg Elapsed Time</th><th class="num ' + c + '">Cases</th>'; }
+  h += '<th class="num c-tot">Avg Elapsed Time</th><th class="num c-tot">Cases</th><th class="num c-tot">SLA Met %</th></tr></thead><tbody>';
+  const selPid = state.sel ? state.sel.path.join('\u0001') : null;
+  const out = [];
+  const walk = (rs, depth, path) => {
+    const lv = levels[depth], leaf = depth === levels.length - 1;
+    for (const g of group(rs, lv)){
+      const p = path.concat(g.key), pid = p.join('\u0001');
+      const idx = state.paths.push(p) - 1;
+      const open = !leaf && state.expanded.has(pid);
+      const lbl = lv.label ? (lv.html ? lv.label(g.key, g.rows) : esc(lv.label(g.key, g.rows))) : esc(g.key);
+      const tog = leaf ? '<span class="tog-sp"></span>' : '<button class="tog" data-t="' + idx + '" aria-label="' + (open ? 'Collapse' : 'Expand') + '">' + (open ? '−' : '+') + '</button>';
+      out.push('<tr class="d' + depth + (pid === selPid ? ' sel' : '') + '"><td style="padding-left:' + (10 + depth * 22) + 'px">' + tog + lbl + '</td>' + statCells(stats(g.rows), idx) + '</tr>');
+      if (open) walk(g.rows, depth + 1, p);
+    }
+  };
+  walk(rows, 0, []);
+  h += out.join('') + '</tbody>';
+  h += '<tfoot><tr><td>Total</td>' + statCells(stats(rows), 0) + '</tr></tfoot>';
+  $('#matrix').innerHTML = rows.length ? h : '<tbody><tr><td class="empty">No cases match the current filters.</td></tr></tbody>';
+}
+
+function selectionRows(rows){
+  if (!state.sel) return rows;
+  const levels = HIERS[state.hier].levels.map(k => LV[k]);
+  const {path, sla} = state.sel;
+  return rows.filter(r => {
+    for (let i = 0; i < path.length; i++) if (levels[i].key(r) !== path[i]) return false;
+    return !sla || r.sla === sla;
+  });
+}
+
+const CASE_COLS = [
+  {k:'id', t:'Case #'},
+  {k:'opened', t:'Opened', f:r => fmtDT(r.opened)},
+  {k:'closed', t:'Closed', f:r => fmtDT(r.closed)},
+  {k:'owner', t:'Case Owner'},
+  {k:'company', t:'Company'},
+  {k:'subject', t:'Subject', cls:'subj'},
+  {k:'status', t:'Status'},
+  {k:'segment', t:'Segment'},
+  {k:'week', t:'Week', cls:'num'},
+  {k:'targetMins', t:'Target', cls:'num', f:r => fmtHM(r.targetMins)},
+  {k:'elapsed', t:'Elapsed', cls:'num', f:r => fmtHM(r.elapsed)},
+  {k:'sla', t:'SLA', f:r => '<span class="badge ' + (isBreach(r.sla) ? 'br' : 'met') + '">' + esc(slaLabel(r.sla)) + '</span>', html:true}
+];
+function sortedCases(rows){
+  const {k, dir} = state.sort;
+  return rows.slice().sort((a, b) => {
+    const x = a[k], y = b[k];
+    if (x == null && y == null) return 0;
+    if (x == null) return 1;
+    if (y == null) return -1;
+    return (typeof x === 'number' && typeof y === 'number' ? x - y : cmpText(x, y)) * dir;
+  });
+}
+function renderCases(rows){
+  const list = sortedCases(selectionRows(rows));
+  const shown = list.slice(0, state.limit);
+  let h = '<thead><tr>' + CASE_COLS.map(c => '<th class="sortable ' + (c.cls === 'num' ? 'num' : '') + '" data-s="' + c.k + '">' + esc(c.t) + (state.sort.k === c.k ? (state.sort.dir > 0 ? ' ▲' : ' ▼') : '') + '</th>').join('') + '</tr></thead><tbody>';
+  h += shown.map(r => '<tr>' + CASE_COLS.map(c => {
+    const v = c.f ? c.f(r) : r[c.k];
+    const cell = c.html ? v : esc(v);
+    return '<td class="' + (c.cls || '') + '"' + (c.k === 'subject' ? ' title="' + esc(r.subject) + '"' : '') + '>' + cell + '</td>';
+  }).join('') + '</tr>').join('') + '</tbody>';
+  $('#cases').innerHTML = list.length ? h : '<tbody><tr><td class="empty">No cases.</td></tr></tbody>';
+  $('#caseCount').textContent = list.length ? 'Showing ' + fmtInt(shown.length) + ' of ' + fmtInt(list.length) : '';
+  $('#moreWrap').hidden = list.length <= state.limit;
+  $('#selChip').innerHTML = state.sel ? '<span class="chip">' + esc(state.sel.label) + ' <button id="clearSel" aria-label="Clear selection">×</button></span>' : '';
+}
+
+function selLabel(path, sla){
+  const levels = HIERS[state.hier].levels.map(k => LV[k]);
+  const parts = path.map((k, i) => {
+    const lv = levels[i];
+    if (lv === LV.month) return monthLabel(k);
+    if (lv === LV.day) return dayLabel(k);
+    if (lv === LV.week) return 'Week ' + weekNum(k);
+    return k;
+  });
+  if (sla) parts.push(slaLabel(sla));
+  return parts.length ? parts.join(' › ') : 'All cases';
+}
+
+/* ---------- Expand / collapse ---------- */
+function expandLevel(){
+  const levels = HIERS[state.hier].levels.map(k => LV[k]);
+  let frontier = [{rows:filteredRows(), depth:0, path:[]}];
+  while (frontier.length){
+    const next = []; let added = false;
+    for (const n of frontier){
+      if (n.depth >= levels.length - 1) continue;
+      for (const g of group(n.rows, levels[n.depth])){
+        const p = n.path.concat(g.key), pid = p.join('\u0001');
+        if (!state.expanded.has(pid)){ state.expanded.add(pid); added = true; }
+        next.push({rows:g.rows, depth:n.depth + 1, path:p});
+      }
+    }
+    if (added) break;
+    frontier = next;
+  }
+  renderMatrix(filteredRows());
+}
+
+/* ---------- Export ---------- */
+function exportXlsx(){
+  const rows = filteredRows();
+  if (!rows.length) return;
+  const levels = HIERS[state.hier].levels.map(k => LV[k]).filter(l => l !== LV.case);
+  const keys = state.slaKeys;
+  const hdr = ['Level'].concat(levels.map(l => l.name));
+  for (const k of keys) hdr.push(slaLabel(k) + ' - Avg Elapsed Time', slaLabel(k) + ' - Cases');
+  hdr.push('Total - Avg Elapsed Time', 'Total - Cases', 'SLA Met %');
+  const aoa = [hdr];
+  const plain = (lv, k) => lv === LV.month ? monthLabel(k) : lv === LV.day ? dayLabel(k) : lv === LV.week ? 'Week ' + weekNum(k) : k;
+  const line = (name, labels, s) => {
+    const r = [name].concat(labels);
+    while (r.length < levels.length + 1) r.push('');
+    for (const k of keys){ const b = s.by[k]; r.push(b ? fmtHM(avg(b)) : '', b ? b.n : ''); }
+    r.push(fmtHM(avg(s)), s.n, s.n ? +(s.met / s.n * 100).toFixed(1) : '');
+    return r;
+  };
+  const walk = (rs, depth, labels) => {
+    for (const g of group(rs, levels[depth])){
+      const l = labels.concat(plain(levels[depth], g.key));
+      aoa.push(line(levels[depth].name, l, stats(g.rows)));
+      if (depth < levels.length - 1) walk(g.rows, depth + 1, l);
+    }
+  };
+  walk(rows, 0, []);
+  aoa.push(line('Total', [], stats(rows)));
+
+  const caseRows = sortedCases(selectionRows(rows)).map(r => ({
+    'Case Number': r.id, 'Date/Time Opened': fmtDT(r.opened), 'Date/Time Closed': fmtDT(r.closed),
+    'Case Owner': r.owner, 'Company Name': r.company, 'Ultimate Parent': r.parent, 'Customer Segment': r.segment,
+    'Contact Name': r.contact, 'Subject': r.subject, 'Status': r.status, 'Case Origin': r.origin,
+    'Creation Week': r.week, 'Target Response (Mins)': r.targetMins, 'Target Response (h m)': fmtHM(r.targetMins), 'Elapsed Time (Mins)': r.elapsed,
+    'Elapsed Time (h m)': fmtHM(r.elapsed), 'SLA Breached?': r.sla
+  }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), 'Summary');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(caseRows), 'Cases');
+  const d = new Date();
+  XLSX.writeFile(wb, 'SLA Report ' + d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + '.xlsx');
+}
+
+/* ---------- Events ---------- */
+function setStatus(msg, err){ const s = $('#status'); s.textContent = msg; s.classList.toggle('err', !!err); }
+
+const drop = $('#drop'), fileIn = $('#file');
+$('#pick').addEventListener('click', () => fileIn.click());
+fileIn.addEventListener('change', () => { if (fileIn.files.length) loadFiles(fileIn.files); fileIn.value = ''; });
+['dragenter', 'dragover'].forEach(ev => window.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
+['dragleave', 'drop'].forEach(ev => window.addEventListener(ev, e => { e.preventDefault(); if (ev === 'drop' || !e.relatedTarget) drop.classList.remove('over'); }));
+window.addEventListener('drop', e => { if (e.dataTransfer && e.dataTransfer.files.length) loadFiles(e.dataTransfer.files); });
+
+$('#clear').addEventListener('click', () => {
+  if (!state.rows.length) return;
+  if (!confirm('Remove all loaded data from this dashboard?')) return;
+  state.rows = []; state.files = [];
+  onDataChanged();
+  setStatus('Cleared. Choose or drop an export file.');
+});
+
+const dateT = v => { if (!v) return null; const [y, m, d] = v.split('-').map(Number); return new Date(y, m - 1, d).getTime(); };
+$('#from').addEventListener('change', e => { state.from = e.target.value; state.fromT = dateT(state.from); renderAll(); });
+$('#to').addEventListener('change', e => { state.to = e.target.value; const t = dateT(state.to); state.toT = t == null ? null : t + 864e5; renderAll(); });
+let qTimer;
+$('#q').addEventListener('input', e => { clearTimeout(qTimer); qTimer = setTimeout(() => { state.q = e.target.value.trim().toLowerCase(); state.limit = 200; renderAll(); }, 180); });
+$('#resetF').addEventListener('click', () => {
+  blankFilters();
+  state.from = state.to = state.q = ''; state.fromT = state.toT = null; state.sel = null;
+  $('#from').value = $('#to').value = $('#q').value = '';
+  renderAll();
+});
+$('#export').addEventListener('click', exportXlsx);
+// Close multi-select dropdowns on outside click or Escape
+document.addEventListener('click', e => {
+  const path = e.composedPath ? e.composedPath() : [];
+  document.querySelectorAll('.ms').forEach(box => { if (!path.includes(box)) box.querySelector('.ms-pop').hidden = true; });
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') document.querySelectorAll('.ms-pop').forEach(p => { p.hidden = true; });
+});
+
+const hierSel = $('#hier');
+hierSel.innerHTML = Object.entries(HIERS).map(([k, h]) => '<option value="' + k + '">' + esc(h.label) + '</option>').join('');
+hierSel.addEventListener('change', () => { state.hier = hierSel.value; state.expanded.clear(); state.sel = null; renderAll(); });
+$('#expand').addEventListener('click', expandLevel);
+$('#collapse').addEventListener('click', () => { state.expanded.clear(); renderMatrix(filteredRows()); });
+
+$('#matrix').addEventListener('click', e => {
+  const t = e.target.closest('.tog');
+  if (t){
+    const pid = state.paths[+t.dataset.t].join('\u0001');
+    if (state.expanded.has(pid)) state.expanded.delete(pid); else state.expanded.add(pid);
+    renderMatrix(filteredRows());
+    return;
+  }
+  const c = e.target.closest('.cnt');
+  if (c){
+    const path = state.paths[+c.dataset.p], sla = c.dataset.k;
+    state.sel = path.length || sla ? {path, sla, label:selLabel(path, sla)} : null;
+    state.limit = 200;
+    const rows = filteredRows();
+    renderMatrix(rows); renderCases(rows);
+    $('#casesCard').scrollIntoView({behavior:'smooth', block:'start'});
+  }
+});
+$('#kpis').addEventListener('click', e => {
+  const k = e.target.closest('.kpi'); if (!k) return;
+  const pick = k.dataset.sla;
+  if (!pick) return; // "Avg elapsed time" card is informational
+  state.filters.sla = pick === 'met' ? state.slaKeys.filter(x => !isBreach(x)) : pick === 'br' ? state.slaKeys.filter(isBreach) : [];
+  state.sel = null; renderAll();
+});
+$('#cases').addEventListener('click', e => {
+  const th = e.target.closest('th[data-s]'); if (!th) return;
+  const k = th.dataset.s;
+  state.sort = state.sort.k === k ? {k, dir:-state.sort.dir} : {k, dir:1};
+  renderCases(filteredRows());
+});
+$('#casesCard').addEventListener('click', e => {
+  if (e.target.id === 'clearSel'){ state.sel = null; const rows = filteredRows(); renderMatrix(rows); renderCases(rows); }
+});
+$('#more').addEventListener('click', () => { state.limit += 500; renderCases(filteredRows()); });
+
+window.__slaLoadFiles = loadFiles; // used by the build self-test
+renderAll();
+purgeSavedData();
+})();
+</script>
+</body>
+</html>
