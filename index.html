@@ -1,12 +1,32 @@
 <!doctype html>
-<!-- GitHub Pages entry point: forwards to the built dashboard. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>SLA Dashboard</title>
-<meta http-equiv="refresh" content="0; url=SLA-Dashboard.html">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Joshua Nguyen</title>
+<meta name="description" content="Welcome to Joshua's GitHub website: a growing collection of tools.">
+<link rel="stylesheet" href="/assets/bus.css">
+<script src="/assets/core/theme.js"></script>
 </head>
 <body>
-<p><a href="SLA-Dashboard.html">Open the SLA Dashboard</a></p>
+<header data-shell="nav"></header>
+
+<main>
+  <header class="hero">
+    <h1>Welcome to Joshua's GitHub website.</h1>
+    <p>A growing collection of tools. Pick one to get started.</p>
+  </header>
+  <!-- Tiles come from /assets/tools.json -->
+  <section class="tiles" id="tools" aria-label="Tools"></section>
+  <noscript><p class="empty">Turn on JavaScript to see the tools.</p></noscript>
+</main>
+
+<footer data-shell="footer"></footer>
+<script type="module" src="/assets/core/shell.js"></script>
+<script type="module">
+import { loadTools } from '/assets/core/registry.js';
+import { renderTiles } from '/assets/core/tiles.js';
+renderTiles(document.getElementById('tools'), await loadTools());
+</script>
 </body>
 </html>

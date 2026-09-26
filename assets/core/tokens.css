@@ -1,0 +1,29 @@
+/* Design tokens: the raw materials every page draws from.
+   Add new tokens freely. Don't rename or remove existing ones; pages may depend on them.
+   Dark values apply when the system is dark (unless the visitor picked light) or when they picked dark. */
+:root{
+  --font:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text","Segoe UI Variable Display","Segoe UI",system-ui,"Helvetica Neue",Arial,sans-serif;
+  --bg:#ffffff; --text:#1d1d1f; --muted:#6e6e73; --tile:#f5f5f7; --tile-hover:#ececf0;
+  --line:rgba(0,0,0,.08); --nav-bg:rgba(255,255,255,.72); --link:#0066cc;
+  --accent:#0071e3; --accent-text:#ffffff; --live:#1d8a3a;
+  --max-width:1024px; --gutter:22px; --nav-height:48px;
+  --radius-tile:28px; --radius-pill:980px;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#000000; --text:#f5f5f7; --muted:#a1a1a6; --tile:#1c1c1e; --tile-hover:#252528;
+    --line:rgba(255,255,255,.12); --nav-bg:rgba(22,22,23,.72); --link:#2997ff;
+    --live:#30d158;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#000000; --text:#f5f5f7; --muted:#a1a1a6; --tile:#1c1c1e; --tile-hover:#252528;
+  --line:rgba(255,255,255,.12); --nav-bg:rgba(22,22,23,.72); --link:#2997ff;
+  --live:#30d158;
+  color-scheme:dark;
+}
+@media (max-width:640px){
+  :root{ --gutter:16px; }
+}

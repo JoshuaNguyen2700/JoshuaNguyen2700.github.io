@@ -1,0 +1,3 @@
+# Real Salesforce exports used by the live preview - never publish case data
+samples/
+__pycache__/

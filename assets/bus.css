@@ -1,0 +1,7 @@
+/* THE MAIN BUS: every page links this one file to get the shared look.
+   Layers load in this order and later layers win. A tool's own CSS is unlayered,
+   so it always wins over all of these without fighting over specificity. */
+@layer tokens, base, components;
+@import url("core/tokens.css") layer(tokens);
+@import url("core/base.css") layer(base);
+@import url("core/components.css") layer(components);

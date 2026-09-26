@@ -5,131 +5,216 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SLA Dashboard</title>
 <style>
+/* Same look as the rest of the website, kept inline so this file still works offline on its own.
+   Light/dark follows the system setting until the viewer picks one with the nav toggle. */
 :root{
-  --red:#E6100D; --red-50:#fdeceb; --red-100:#f9c9c7;
-  --navy:#002048; --navy-80:#1c3a66; --navy-50:#e9eef6;
-  --black:#111111; --ink:#1b1f24; --muted:#5b6472; --line:#dfe3ea; --bg:#f3f5f8; --white:#ffffff;
+  --font:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI Variable Text","Segoe UI",system-ui,"Helvetica Neue",Arial,sans-serif;
+  --bg:#f5f5f7; --card:#ffffff; --raised:#fafafc; --text:#1d1d1f; --muted:#6e6e73;
+  --line:#d2d2d7; --hair:#e8e8ed; --hover:#f5f5f7; --nav-bg:rgba(255,255,255,.72);
+  --accent:#0071e3; --accent-text:#ffffff; --link:#0066cc; --accent-tint:rgba(0,113,227,.10);
+  --fill:#e8e8ed; --fill-hover:#dcdce1;
+  --met:#1d8a3a; --met-tint:rgba(29,138,58,.12);
+  --breach:#d70015; --breach-tint:rgba(215,0,21,.09);
+  --shadow:0 8px 28px rgba(0,0,0,.12);
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#000000; --card:#1c1c1e; --raised:#242426; --text:#f5f5f7; --muted:#a1a1a6;
+    --line:#3a3a3c; --hair:#2c2c2e; --hover:#2c2c2e; --nav-bg:rgba(22,22,23,.72);
+    --accent:#0a84ff; --link:#2997ff; --accent-tint:rgba(10,132,255,.20);
+    --fill:#2c2c2e; --fill-hover:#3a3a3c;
+    --met:#30d158; --met-tint:rgba(48,209,88,.16);
+    --breach:#ff453a; --breach-tint:rgba(255,69,58,.16);
+    --shadow:0 8px 28px rgba(0,0,0,.6);
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#000000; --card:#1c1c1e; --raised:#242426; --text:#f5f5f7; --muted:#a1a1a6;
+  --line:#3a3a3c; --hair:#2c2c2e; --hover:#2c2c2e; --nav-bg:rgba(22,22,23,.72);
+  --accent:#0a84ff; --link:#2997ff; --accent-tint:rgba(10,132,255,.20);
+  --fill:#2c2c2e; --fill-hover:#3a3a3c;
+  --met:#30d158; --met-tint:rgba(48,209,88,.16);
+  --breach:#ff453a; --breach-tint:rgba(255,69,58,.16);
+  --shadow:0 8px 28px rgba(0,0,0,.6);
+  color-scheme:dark;
 }
 *{box-sizing:border-box}
-body{margin:0;font-family:"Segoe UI",system-ui,-apple-system,Arial,sans-serif;background:var(--bg);color:var(--ink);font-size:14px}
-button,select,input{font:inherit}
+body{margin:0;font-family:var(--font);background:var(--bg);color:var(--text);font-size:14px;letter-spacing:-.01em;-webkit-font-smoothing:antialiased}
+button,select,input{font:inherit;letter-spacing:inherit}
+a{color:var(--link);text-decoration:none}
+a:hover{text-decoration:underline}
 
-/* Header */
-.top{background:var(--navy);color:var(--white);border-bottom:4px solid var(--red)}
-.top-inner{max-width:1480px;margin:0 auto;padding:18px 24px;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
-.top h1{margin:0;font-size:22px;font-weight:700}
-.top p{margin:4px 0 0;color:#c9d3e3;font-size:13px}
+/* Site nav: same as the other pages. Links are absolute so they also work when the file is opened offline. */
+.nav{position:sticky;top:0;z-index:30;background:var(--nav-bg);backdrop-filter:saturate(180%) blur(20px);-webkit-backdrop-filter:saturate(180%) blur(20px);border-bottom:1px solid var(--hair)}
+.nav-inner{max-width:1480px;margin:0 auto;padding:0 24px;height:48px;display:flex;align-items:center;justify-content:space-between;gap:16px}
+.nav a{color:var(--text);opacity:.85;font-size:13px}
+.nav a:hover{opacity:1;text-decoration:none}
+.nav .brand{font-weight:600;font-size:15px;opacity:1}
+.nav-links{display:flex;align-items:center;gap:24px}
+.theme-btn{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;margin:-4px -6px;padding:0;border:0;border-radius:50%;background:none;color:var(--text);opacity:.85;cursor:pointer}
+.theme-btn:hover{opacity:1;background:var(--fill)}
+.theme-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.theme-btn svg{width:16px;height:16px}
+.theme-btn .i-sun{display:none}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]) .theme-btn .i-sun{display:block}
+  :root:not([data-theme="light"]) .theme-btn .i-moon{display:none}
+}
+:root[data-theme="dark"] .theme-btn .i-sun{display:block}
+:root[data-theme="dark"] .theme-btn .i-moon{display:none}
+
+/* Page header */
+.top-inner{max-width:1480px;margin:0 auto;padding:40px 24px 8px;display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.top h1{margin:0;font-size:clamp(32px,4.5vw,48px);line-height:1.08;font-weight:700;letter-spacing:-.03em}
+.top p{margin:8px 0 0;color:var(--muted);font-size:17px}
 .top-right{text-align:right}
-.pill{display:inline-block;background:var(--white);color:var(--navy);font-weight:700;border-radius:999px;padding:6px 14px;font-size:13px;white-space:nowrap}
-.asof{color:#c9d3e3;font-size:12px;margin-top:6px}
+.pill{display:inline-block;background:var(--card);color:var(--text);font-weight:600;border:1px solid var(--hair);border-radius:980px;padding:6px 14px;font-size:13px;white-space:nowrap}
+.asof{color:var(--muted);font-size:12px;margin-top:6px}
 
-main{max-width:1480px;margin:0 auto;padding:18px 24px 48px}
-.card{background:var(--white);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:16px}
-.card h2{margin:0 0 12px;font-size:16px;color:var(--black);display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+main{max-width:1480px;margin:0 auto;padding:20px 24px 56px}
+.card{background:var(--card);border-radius:18px;padding:20px;margin-bottom:16px}
+.card h2{margin:0 0 14px;font-size:19px;font-weight:600;letter-spacing:-.02em;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .card h2 .sp{flex:1}
+.card h2 select{padding:6px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--text);font-size:13px;font-weight:400}
 
 /* Buttons */
-.btn{border:1px solid #c8cfda;background:var(--white);color:var(--black);padding:7px 14px;border-radius:7px;font-weight:600;cursor:pointer;white-space:nowrap}
-.btn:hover{border-color:var(--navy)}
-.btn.primary{background:var(--navy);border-color:var(--navy);color:var(--white)}
-.btn.primary:hover{background:var(--navy-80)}
-.btn.red{background:var(--red);border-color:var(--red);color:var(--white)}
-.btn.red:hover{filter:brightness(.92)}
-.btn.outline-red{color:var(--red);border-color:var(--red-100)}
-.btn.outline-red:hover{border-color:var(--red)}
-.btn.sm{padding:5px 10px;font-size:13px}
+.btn{border:0;background:var(--fill);color:var(--text);padding:8px 16px;border-radius:980px;font-weight:500;cursor:pointer;white-space:nowrap}
+.btn:hover{background:var(--fill-hover)}
+.btn.primary{background:var(--accent);color:var(--accent-text)}
+.btn.primary:hover{background:var(--accent);filter:brightness(1.08)}
+.btn.danger{background:transparent;color:var(--breach)}
+.btn.danger:hover{background:var(--breach-tint)}
+.btn.sm{padding:6px 12px;font-size:13px}
 .btn:disabled{opacity:.45;cursor:not-allowed}
+.btn:focus-visible,.kpi:focus-visible,.cnt:focus-visible,.tog:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
 /* Upload */
-.drop{border:2px dashed #8fa0bb;border-radius:10px;padding:22px;text-align:center;transition:background .15s,border-color .15s}
-.drop.over{border-color:var(--red);background:var(--red-50)}
-.drop strong{display:block;color:var(--black);font-size:15px}
+.drop{border:2px dashed var(--line);border-radius:14px;padding:26px;text-align:center;transition:background .15s,border-color .15s}
+.drop.over{border-color:var(--accent);background:var(--accent-tint)}
+.drop strong{display:block;font-size:17px;font-weight:600}
 .drop small{color:var(--muted)}
-.drop .row{margin-top:12px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
-.status{border-left:4px solid var(--navy);background:var(--navy-50);padding:10px 12px;margin-top:12px;border-radius:0 6px 6px 0}
-.status.err{border-left-color:var(--red);background:var(--red-50)}
-details.diag{margin-top:10px}
-details.diag summary{cursor:pointer;font-weight:600;color:var(--black)}
+.drop .row{margin-top:14px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+.status{background:var(--raised);padding:10px 14px;margin-top:12px;border-radius:10px}
+.status.err{background:var(--breach-tint);color:var(--breach)}
+details.diag{margin-top:12px}
+details.diag summary{cursor:pointer;font-weight:600}
 .diag table{margin-top:8px}
 
 /* KPIs */
-.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:16px}
-.kpi{background:var(--white);border:1px solid var(--line);border-left:5px solid var(--navy);border-radius:10px;padding:12px 16px;cursor:pointer;text-align:left;color:inherit}
-.kpi:hover{box-shadow:0 1px 6px rgba(0,32,72,.12)}
-.kpi.red{border-left-color:var(--red)}
-.kpi.black{border-left-color:var(--black)}
-.kpi.active{outline:2px solid var(--navy);outline-offset:-1px}
-.kpi.red.active{outline-color:var(--red)}
-.kpi .lbl{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)}
-.kpi .val{font-size:28px;font-weight:800;color:var(--black);margin-top:2px}
-.kpi.red .val{color:var(--red)}
-.kpi .sub{font-size:12px;color:var(--muted);margin-top:2px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:16px}
+.kpi{background:var(--card);border:0;border-radius:18px;padding:18px 20px;cursor:pointer;text-align:left;color:inherit;transition:transform .25s ease,box-shadow .25s ease}
+.kpi:hover{transform:translateY(-1px);box-shadow:var(--shadow)}
+.kpi.active{outline:2px solid var(--accent);outline-offset:-2px}
+.kpi.red.active{outline-color:var(--breach)}
+.kpi .lbl{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+.kpi .val{font-size:34px;font-weight:700;letter-spacing:-.03em;margin-top:4px}
+.kpi.red .val{color:var(--breach)}
+.kpi .sub{font-size:13px;color:var(--muted);margin-top:2px}
 
 /* Filters */
 .filters{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
-.filters select,.filters input{padding:7px 9px;border:1px solid #c8cfda;border-radius:7px;background:var(--white);color:var(--ink);max-width:230px}
-.filters select.on,.filters input.on{border-color:var(--navy);background:var(--navy-50);font-weight:600}
-.filters label{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px}
+.filters select,.filters input{padding:7px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--text);max-width:230px}
+.filters select.on,.filters input.on{border-color:var(--accent);background:var(--accent-tint);font-weight:600}
+.filters label{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:6px}
 .filters .search{min-width:240px}
 .ms{position:relative;display:inline-block}
-.ms-btn{position:relative;min-width:170px;max-width:230px;padding:7px 28px 7px 9px;border:1px solid #c8cfda;border-radius:7px;background:var(--white);color:var(--ink);text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
-.ms-btn::after{content:'▾';position:absolute;right:9px;top:50%;transform:translateY(-50%);color:var(--muted)}
-.ms.on .ms-btn{border-color:var(--navy);background:var(--navy-50);font-weight:600}
-.ms-pop{position:absolute;z-index:20;top:calc(100% + 4px);left:0;width:290px;background:var(--white);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(0,32,72,.18);padding:8px}
+.ms-btn{position:relative;min-width:170px;max-width:230px;padding:7px 30px 7px 12px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--text);text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
+.ms-btn::after{content:'▾';position:absolute;right:11px;top:50%;transform:translateY(-50%);color:var(--muted)}
+.ms.on .ms-btn{border-color:var(--accent);background:var(--accent-tint);font-weight:600}
+.ms-pop{position:absolute;z-index:20;top:calc(100% + 6px);left:0;width:290px;background:var(--card);border:1px solid var(--hair);border-radius:14px;box-shadow:var(--shadow);padding:8px}
 .filters .ms-q{width:100%;max-width:none}
 .ms-act{display:flex;gap:6px;margin:8px 0 6px}
 .ms-list{max-height:300px;overflow:auto}
-.filters .ms-list label{display:flex;align-items:center;gap:8px;padding:5px 6px;border-radius:5px;cursor:pointer;font-size:13px;color:var(--ink)}
-.ms-list label:hover{background:var(--bg)}
+.filters .ms-list label{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:8px;cursor:pointer;font-size:13px;color:var(--text)}
+.ms-list label:hover{background:var(--hover)}
 .ms-list label .muted{margin-left:auto;font-size:12px}
-.filters .ms-list input{padding:0;accent-color:var(--navy);width:15px;height:15px;flex:none}
+.filters .ms-list input{padding:0;accent-color:var(--accent);width:15px;height:15px;flex:none}
 @media (max-width:640px){ .ms,.ms-btn{width:100%;max-width:100%} .ms-pop{width:100%} }
 
 /* Tables */
-.tbl-wrap{overflow:auto;max-height:72vh;border:1px solid var(--line);border-radius:8px;background:var(--white)}
-table{border-collapse:separate;border-spacing:0;width:100%;font-size:13px}
-th{position:sticky;top:0;z-index:2;background:var(--navy);color:var(--white);text-align:left;padding:0 10px;height:34px;white-space:nowrap;font-weight:600}
-thead tr:nth-child(2) th{top:34px;background:var(--navy-80);font-weight:500;font-size:12px}
-th.g-br{background:var(--red)}
-thead tr:nth-child(2) th.c-br{background:#b90d0b}
-th.g-tot{background:var(--black)}
-thead tr:nth-child(2) th.c-tot{background:#2a2a2a}
+.tbl-wrap{overflow:auto;max-height:72vh;border:1px solid var(--hair);border-radius:12px;background:var(--card)}
+table{border-collapse:separate;border-spacing:0;width:100%;font-size:13px;font-variant-numeric:tabular-nums}
+th{position:sticky;top:0;z-index:2;background:var(--raised);color:var(--text);text-align:left;padding:0 12px;height:36px;white-space:nowrap;font-weight:600;border-bottom:1px solid var(--hair)}
 th.num,td.num{text-align:right}
-td{padding:6px 10px;border-bottom:1px solid #eef0f4;white-space:nowrap}
-tbody tr:hover td{background:#f7f9fc}
-tr.d0 td{font-weight:600}
-tr.d0 td:first-child{color:var(--black)}
-tr.sel td{background:#fff3cd !important}
-tfoot td{position:sticky;bottom:0;z-index:1;background:#f0f2f6;font-weight:800;border-top:2px solid var(--black);color:var(--black)}
-.tog{display:inline-block;width:18px;height:18px;border:1px solid #9aa6b8;border-radius:3px;background:var(--white);font-size:13px;line-height:15px;padding:0;cursor:pointer;margin-right:6px;color:var(--navy);text-align:center;vertical-align:middle}
-.tog:hover{border-color:var(--navy)}
-.tog-sp{display:inline-block;width:24px}
-.cnt{background:none;border:0;color:var(--navy);font-weight:inherit;cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px;padding:0}
-.cnt:hover{text-decoration:underline}
-td.br .cnt{color:var(--red)}
+td{padding:7px 12px;border-bottom:1px solid var(--hair);white-space:nowrap}
+tbody tr:hover td{background:var(--hover)}
+tr.sel td{background:var(--accent-tint) !important}
+tfoot td{position:sticky;bottom:0;z-index:1;background:var(--raised);font-weight:700;border-top:1px solid var(--line)}
+
+/* SLA matrix */
+#matrix{table-layout:fixed;min-width:980px}
+#matrix col.c-label{width:27%}
+#matrix th{padding:0 16px;height:34px;font-size:12px;font-weight:500;color:var(--muted)}
+#matrix thead tr:first-child th{height:42px;border-bottom:0}
+#matrix thead tr:nth-child(2) th{top:42px}
+#matrix thead th[rowspan]{vertical-align:bottom;padding-bottom:9px;border-bottom:1px solid var(--hair)}
+/* Group titles, each with a colored rule under its columns */
+#matrix th[colspan]{text-align:center;font-size:13px;font-weight:600;letter-spacing:-.01em;
+  background-image:linear-gradient(currentColor,currentColor);background-size:calc(100% - 32px) 2px;background-position:center bottom;background-repeat:no-repeat}
+#matrix th.g-met{color:var(--met)}
+#matrix th.g-br{color:var(--breach)}
+#matrix th.g-tot{color:var(--text)}
+#matrix th.sortable:hover,#matrix th.sorted{color:var(--text)}
+#matrix .arr{margin-left:5px;font-size:9px;color:var(--accent);vertical-align:1px}
+/* Hairline between column groups */
+#matrix .gs{border-left:1px solid var(--hair)}
+#matrix td{padding:0 16px;height:44px;font-weight:400}
+#matrix td:first-child{overflow:hidden;text-overflow:ellipsis;font-weight:500}
+#matrix tr.d0 td:first-child{font-weight:600}
+#matrix td.tot{font-weight:600}
+#matrix tbody tr:last-child td{border-bottom:0}
+#matrix tfoot td{height:46px;font-weight:600}
+/* Label column stays in view when the table scrolls sideways */
+#matrix td:first-child,#matrix th[rowspan]{position:sticky;left:0;z-index:1;background:var(--card)}
+#matrix th[rowspan]{z-index:3;background:var(--raised)}
+#matrix tfoot td:first-child{z-index:2;background:var(--raised)}
+#matrix tbody tr:hover td{background:var(--hover)}
+.nil{color:var(--muted);opacity:.45}
+.meter{display:inline-block;width:40px;height:4px;margin-right:10px;border-radius:2px;background:var(--fill);vertical-align:middle;overflow:hidden}
+.meter i{display:block;height:100%;border-radius:2px;background:var(--met)}
+/* Disclosure chevron: points right when closed, down when open */
+.tog{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;margin:0 6px 0 -4px;padding:0;border:0;border-radius:6px;background:none;color:var(--muted);cursor:pointer;vertical-align:middle;transition:background .15s,color .15s}
+.tog::before{content:'';width:6px;height:6px;margin-left:-2px;border-right:1.75px solid currentColor;border-bottom:1.75px solid currentColor;transform:rotate(-45deg);transition:transform .2s ease}
+.tog.open::before{margin:-3px 0 0;transform:rotate(45deg)}
+.tog:hover{background:var(--fill);color:var(--text)}
+.tog-sp{display:inline-block;width:20px;margin:0 6px 0 -4px;vertical-align:middle}
+.cnt{background:none;border:0;color:var(--link);font-weight:inherit;cursor:pointer;padding:0}
+.cnt:hover{text-decoration:underline;text-underline-offset:3px}
+td.br .cnt{color:var(--breach)}
 .muted{color:var(--muted);font-weight:400}
 .subj{max-width:380px;overflow:hidden;text-overflow:ellipsis}
-.badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:700}
-.badge.met{background:var(--navy-50);color:var(--navy)}
-.badge.br{background:var(--red-50);color:var(--red)}
+.badge{display:inline-block;padding:2px 10px;border-radius:980px;font-size:12px;font-weight:600}
+.badge.met{background:var(--met-tint);color:var(--met)}
+.badge.br{background:var(--breach-tint);color:var(--breach)}
 th.sortable{cursor:pointer;user-select:none}
-th.sortable:hover{text-decoration:underline}
-.chip{display:inline-flex;align-items:center;gap:6px;background:#fff3cd;border:1px solid #f0d58a;border-radius:999px;padding:3px 6px 3px 12px;font-size:13px;font-weight:600;color:var(--black)}
-.chip button{border:0;background:var(--black);color:var(--white);border-radius:999px;width:20px;height:20px;cursor:pointer;line-height:18px;padding:0}
-.hint{color:var(--muted);font-size:12px;margin:8px 0 0}
-.toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
-.toolbar select{padding:6px 9px;border:1px solid #c8cfda;border-radius:7px;background:var(--white)}
+th.sortable:hover{color:var(--link)}
+.chip{display:inline-flex;align-items:center;gap:6px;background:var(--accent-tint);border-radius:980px;padding:3px 6px 3px 12px;font-size:13px;font-weight:600;color:var(--text)}
+.chip button{border:0;background:var(--text);color:var(--bg);border-radius:980px;width:20px;height:20px;cursor:pointer;line-height:18px;padding:0}
+.hint{color:var(--muted);font-size:12px;margin:10px 0 0}
 .empty{text-align:center;color:var(--muted);padding:40px 16px}
-.more{text-align:center;margin-top:10px}
+.more{text-align:center;margin-top:12px}
 [hidden]{display:none !important}
 @media (max-width:640px){
-  main,.top-inner{padding-left:16px;padding-right:16px}
+  main,.top-inner,.nav-inner{padding-left:16px;padding-right:16px}
   .top-right{text-align:left}
   .filters select,.filters input,.filters .search{max-width:100%;width:100%;min-width:0}
 }
 </style>
+<script>try{var t=localStorage.getItem('theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
 </head>
 <body>
+<nav class="nav" aria-label="Site">
+  <div class="nav-inner">
+    <a class="brand" href="https://joshuanguyen2700.github.io/" data-site-path="/">Joshua Nguyen</a>
+    <div class="nav-links">
+      <a href="https://joshuanguyen2700.github.io/#tools" data-site-path="/#tools">Tools</a>
+      <a href="https://github.com/JoshuaNguyen2700">GitHub</a>
+      <button type="button" class="theme-btn" id="themeBtn" aria-label="Switch light or dark mode" title="Light / dark mode"><svg class="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.5 14.2A8.5 8.5 0 1 1 9.8 3.5a6.6 6.6 0 0 0 10.7 10.7z"/></svg><svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg></button>
+    </div>
+  </div>
+</nav>
 <header class="top">
   <div class="top-inner">
     <div>
@@ -147,10 +232,10 @@ th.sortable:hover{text-decoration:underline}
   <section class="card">
     <div class="drop" id="drop">
       <strong>Drop the Salesforce SLA export here</strong>
-      <small>.xlsx, .xls or .csv. Uploading a file clears the previous data and filters.</small>
+      <small>.xlsx, .xls or .csv. Add as many files as you like, together or one at a time; they're combined into one report.</small>
       <div class="row">
         <button class="btn primary" id="pick">Choose files</button>
-        <button class="btn outline-red" id="clear">Clear all data</button>
+        <button class="btn danger" id="clear">Clear all data</button>
       </div>
       <input type="file" id="file" accept=".xlsx,.xlsm,.xls,.csv" multiple hidden>
     </div>
@@ -162,7 +247,7 @@ th.sortable:hover{text-decoration:underline}
   </section>
 
   <div id="emptyState" class="card empty">
-    Load a Salesforce SLA export (for example <b>SLA's - L6W - Customers - Ground DV</b>) to see its report. Data is only kept while this page is open; closing or refreshing it clears everything.
+    Load a Salesforce SLA export (for example <b>SLA's - L6W - Customers - Ground DV</b>) to see its report. You can add more files at any time. Data is only kept while this page is open; closing or refreshing it clears everything.
   </div>
 
   <div id="dash" hidden>
@@ -175,7 +260,7 @@ th.sortable:hover{text-decoration:underline}
         <label>To <input type="date" id="to"></label>
         <input type="search" class="search" id="q" placeholder="Search case #, subject, company, contact">
         <button class="btn sm" id="resetF">Clear filters</button>
-        <button class="btn red sm" id="export">Export to Excel</button>
+        <button class="btn primary sm" id="export">Export to Excel</button>
       </div>
     </section>
 
@@ -186,7 +271,7 @@ th.sortable:hover{text-decoration:underline}
         <button class="btn sm" id="collapse">− Collapse all</button>
       </h2>
       <div class="tbl-wrap"><table id="matrix"></table></div>
-      <p class="hint">Click ⊞ to drill down. Click any case count to list those cases below.</p>
+      <p class="hint">Click ⊞ to drill down. Click a column heading to sort (ascending, descending, off). Click any case count to list those cases below.</p>
     </section>
 
     <section class="card" id="casesCard">
@@ -268,6 +353,16 @@ function toBool(v){
   return s === 'true' || s === '1' || s === 'yes';
 }
 const toStr = v => v == null ? '' : String(v).trim();
+// Tidy a person's name: "Dennis. Irabor" -> "Dennis Irabor", "johnathon ALAMAN" -> "Johnathon Alaman".
+// Punctuation is removed, except hyphens and apostrophes inside a name (Mary-Jane, O'Brien).
+function fmtName(s){
+  return s.replace(/[^\p{L}\p{N}\s'’-]/gu, ' ')
+    .split(/\s+/)
+    .map(w => w.replace(/^['’-]+|['’-]+$/g, ''))
+    .filter(Boolean)
+    .map(w => w.toLowerCase().replace(/(^|['’-])(\p{L})/gu, (m, sep, c) => sep + c.toUpperCase()))
+    .join(' ');
+}
 function isoWeek(t){
   const d = new Date(t);
   const x = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
@@ -311,8 +406,9 @@ const weekNum = k => +k.split('-W')[1];
 const state = {
   rows: [], files: [], slaKeys: [],
   filters: {}, from: '', to: '', fromT: null, toT: null, q: '',
-  hier: 'month', expanded: new Set(), sel: null,
-  sort: {k: 'opened', dir: -1}, limit: 200, paths: []
+  hier: 'owner', expanded: new Set(), sel: null,
+  sort: {k: 'opened', dir: -1}, limit: 200, paths: [],
+  msort: null // matrix column sort: {col:'avg'|'n'|'pct', sla:'<SLA key>' or '' for Total, dir:1|-1}
 };
 
 const FILTERS = [
@@ -343,7 +439,7 @@ const LV = {
   company: {name:'Company', key:r => r.company || '(Blank)'},
   status:  {name:'Status', key:r => r.status || '(Blank)'},
   case:    {name:'Case Number', key:r => r.id, label:(k, rows) =>
-             esc(k) + ' <span class="muted">' + esc((rows[0].subject || '').slice(0, 70)) + '</span>', html:true}
+             esc(k) + ' <span class="muted">' + esc(rows[0].subject || '') + '</span>', html:true}
 };
 const HIERS = {
   month:    {label:'Month › Day › Case Owner › Case (Power BI view)', levels:['month','day','owner','case']},
@@ -420,7 +516,7 @@ async function readFile(file){
       const wk = toNum(g('week'));
       out.rows.push({
         id, opened, closed:toTime(g('closed')), origin:toStr(g('origin')), status:toStr(g('status')),
-        owner:toStr(g('owner')), company:toStr(g('company')), contact:toStr(g('contact')), email:toStr(g('email')),
+        owner:fmtName(toStr(g('owner'))), company:toStr(g('company')), contact:toStr(g('contact')), email:toStr(g('email')),
         subject:toStr(g('subject')), parent:toStr(g('parent')), segment:toStr(g('segment')),
         target:toTime(g('target')), completion:toTime(g('completion')), violation, targetMins, elapsed,
         week: wk == null ? isoWeek(opened) : Math.round(wk), sla, file:file.name
@@ -436,11 +532,10 @@ async function loadFiles(list){
   const files = [...list].filter(f => /\.(xlsx|xlsm|xls|csv)$/i.test(f.name));
   if (!files.length){ setStatus('No Excel files in that selection. Use .xlsx, .xls or .csv.', true); return; }
   setStatus('Reading ' + files.length + ' file(s)…');
-  // Every upload starts fresh: the previous report is discarded, never merged.
-  // Files chosen together in one upload are combined (duplicate case numbers kept once).
-  const byId = new Map();
-  const loaded = [];
-  let added = 0, replaced = 0, derived = 0;
+  // Uploads add to the report already loaded. A duplicate case number is counted once, keeping the
+  // newest file's row. Uploading a file with the same name again replaces that file's rows.
+  const read = [];
+  let derived = 0;
   const errs = [];
   for (const f of files){
     try {
@@ -451,25 +546,34 @@ async function loadFiles(list){
           : 'no case rows found') + '. Is this the Salesforce SLA export?');
         continue;
       }
-      for (const r of res.rows){ if (byId.has(r.id)) replaced++; else added++; byId.set(r.id, r); }
+      read.push({f, res});
       derived += res.derived;
-      const i = loaded.findIndex(x => x.name === f.name);
-      if (i >= 0) loaded.splice(i, 1);
-      loaded.push({name:f.name, sheets:res.sheets.join(', '), rows:res.rows.length, skipped:res.skipped, blankSla:res.blankSla, loaded:Date.now()});
     } catch (e){
       errs.push(f.name + ': ' + (e && e.message || e));
     }
   }
-  if (!added && !replaced){
+  if (!read.length){
     // Nothing usable: keep whatever report was already showing
     setStatus('Could not load. ' + errs.join(' | '), true);
     return;
   }
+  const names = new Set(read.map(x => x.f.name));
+  const byId = new Map(state.rows.filter(r => !names.has(r.file)).map(r => [r.id, r]));
+  const loaded = state.files.filter(x => !names.has(x.name));
+  const updated = state.files.some(x => names.has(x.name));
+  let dupes = 0;
+  for (const {f, res} of read){
+    for (const r of res.rows){ if (byId.has(r.id)) dupes++; byId.set(r.id, r); }
+    const i = loaded.findIndex(x => x.name === f.name);
+    if (i >= 0) loaded.splice(i, 1);
+    loaded.push({name:f.name, sheets:res.sheets.join(', '), rows:res.rows.length, skipped:res.skipped, blankSla:res.blankSla, loaded:Date.now()});
+  }
+  const hadData = state.rows.length > 0;
   state.rows = [...byId.values()];
   state.files = loaded;
   onDataChanged();
-  let msg = 'Previous data cleared. Showing ' + loaded.map(f => f.name).join(', ') + ': ' + fmtInt(state.rows.length) + ' cases.';
-  if (replaced) msg += ' ' + fmtInt(replaced) + ' duplicate case number(s) across the files were counted once.';
+  let msg = (updated ? 'Updated ' : hadData ? 'Added ' : 'Loaded ') + [...names].join(', ') + '. Showing ' + fmtInt(state.rows.length) + ' cases from ' + loaded.length + ' file' + (loaded.length === 1 ? '' : 's') + '.';
+  if (dupes) msg += ' ' + fmtInt(dupes) + ' duplicate case number(s) were counted once, using the newest file.';
   if (derived) msg += ' This file has no "SLA Breached?" column, so SLA Met/Breached was worked out from Violation (or Elapsed vs Target) for ' + fmtInt(derived) + ' case(s).';
   if (errs.length) msg += ' Skipped: ' + errs.join(' | ');
   setStatus(msg, errs.length > 0);
@@ -629,38 +733,71 @@ function renderKpis(rows){
     '<button class="kpi" data-sla=""><div class="lbl">Avg elapsed time</div><div class="val">' + (fmtHM(avg(s)) || '–') + '</div><div class="sub">All cases in the current filter</div></button>';
 }
 
+// "gs" marks the first cell of each column group (SLA results, Total) so groups get a divider
+const NIL = '<span class="nil">–</span>';
 function statCells(s, pathIdx){
   let h = '';
   for (const k of state.slaKeys){
     const b = s.by[k], cls = isBreach(k) ? 'br' : 'met';
-    h += '<td class="num ' + cls + '">' + (b ? fmtHM(avg(b)) : '') + '</td>';
-    h += '<td class="num ' + cls + '">' + (b ? cntBtn(b.n, pathIdx, k) : '') + '</td>';
+    h += '<td class="num gs ' + cls + '">' + (b && fmtHM(avg(b)) || NIL) + '</td>';
+    h += '<td class="num ' + cls + '">' + (b ? cntBtn(b.n, pathIdx, k) : NIL) + '</td>';
   }
-  h += '<td class="num"><b>' + fmtHM(avg(s)) + '</b></td><td class="num"><b>' + cntBtn(s.n, pathIdx, '') + '</b></td><td class="num">' + fmtPct(s.met, s.n) + '</td>';
+  h += '<td class="num gs tot">' + (fmtHM(avg(s)) || NIL) + '</td><td class="num tot">' + cntBtn(s.n, pathIdx, '') + '</td><td class="num tot">' + pctCell(s) + '</td>';
   return h;
 }
 const cntBtn = (n, p, k) => '<button class="cnt" data-p="' + p + '" data-k="' + esc(k) + '">' + fmtInt(n) + '</button>';
+// SLA Met % with a slim meter, so rates can be compared at a glance
+const pctCell = s => s.n
+  ? '<span class="meter" aria-hidden="true"><i style="width:' + (s.met / s.n * 100).toFixed(1) + '%"></i></span>' + fmtPct(s.met, s.n)
+  : NIL;
+
+/* Matrix column sorting: rows at each level are ordered by the chosen column.
+   Ties, and no sort at all, keep the normal name order. */
+function metric(s, col, sla){
+  if (col === 'pct') return s.n ? s.met / s.n : null;
+  const b = sla ? s.by[sla] : s;
+  if (col === 'n') return b ? b.n : 0;
+  return b ? avg(b) : null;
+}
+function sortGroups(groups){
+  groups.forEach(g => { g.s = stats(g.rows); });
+  const m = state.msort;
+  if (!m) return groups;
+  return groups.map(g => ({g, v:metric(g.s, m.col, m.sla)}))
+    .sort((a, b) => a.v == null ? (b.v == null ? 0 : 1) : b.v == null ? -1 : (a.v - b.v) * m.dir)
+    .map(x => x.g);
+}
+function msTh(label, col, sla, cls){
+  const m = state.msort, on = m && m.col === col && m.sla === sla;
+  return '<th class="num sortable ' + cls + (on ? ' sorted' : '') + '" data-mcol="' + col + '" data-msla="' + esc(sla) + '" title="Click to sort"' +
+    (on ? ' aria-sort="' + (m.dir > 0 ? 'ascending' : 'descending') + '"' : '') + '>' +
+    label + (on ? '<span class="arr">' + (m.dir > 0 ? '▲' : '▼') + '</span>' : '') + '</th>';
+}
 
 function renderMatrix(rows){
   const levels = HIERS[state.hier].levels.map(k => LV[k]);
   const keys = state.slaKeys;
   state.paths = [[]];
-  let h = '<thead><tr><th rowspan="2">' + esc(levels.map(l => l.name).join(' › ')) + '</th>';
-  for (const k of keys) h += '<th colspan="2" class="' + (isBreach(k) ? 'g-br' : '') + '">' + esc(slaLabel(k)) + '</th>';
-  h += '<th colspan="3" class="g-tot">Total</th></tr><tr>';
-  for (const k of keys){ const c = isBreach(k) ? 'c-br' : ''; h += '<th class="num ' + c + '">Avg Elapsed Time</th><th class="num ' + c + '">Cases</th>'; }
-  h += '<th class="num c-tot">Avg Elapsed Time</th><th class="num c-tot">Cases</th><th class="num c-tot">SLA Met %</th></tr></thead><tbody>';
+  // Fixed column widths: a wide label column, then evenly spaced number columns
+  let h = '<colgroup><col class="c-label">' + '<col>'.repeat(keys.length * 2 + 3) + '</colgroup>';
+  h += '<thead><tr><th rowspan="2">' + esc(levels.map(l => l.name).join(' › ')) + '</th>';
+  for (const k of keys) h += '<th colspan="2" class="gs ' + (isBreach(k) ? 'g-br' : 'g-met') + '">' + esc(slaLabel(k)) + '</th>';
+  h += '<th colspan="3" class="gs g-tot">Total</th></tr><tr>';
+  for (const k of keys){ const c = isBreach(k) ? 'c-br' : ''; h += msTh('Avg Elapsed Time', 'avg', k, 'gs ' + c) + msTh('Cases', 'n', k, c); }
+  h += msTh('Avg Elapsed Time', 'avg', '', 'gs c-tot') + msTh('Cases', 'n', '', 'c-tot') + msTh('SLA Met %', 'pct', '', 'c-tot') + '</tr></thead><tbody>';
   const selPid = state.sel ? state.sel.path.join('\u0001') : null;
   const out = [];
   const walk = (rs, depth, path) => {
     const lv = levels[depth], leaf = depth === levels.length - 1;
-    for (const g of group(rs, lv)){
+    for (const g of sortGroups(group(rs, lv))){
       const p = path.concat(g.key), pid = p.join('\u0001');
       const idx = state.paths.push(p) - 1;
       const open = !leaf && state.expanded.has(pid);
       const lbl = lv.label ? (lv.html ? lv.label(g.key, g.rows) : esc(lv.label(g.key, g.rows))) : esc(g.key);
-      const tog = leaf ? '<span class="tog-sp"></span>' : '<button class="tog" data-t="' + idx + '" aria-label="' + (open ? 'Collapse' : 'Expand') + '">' + (open ? '−' : '+') + '</button>';
-      out.push('<tr class="d' + depth + (pid === selPid ? ' sel' : '') + '"><td style="padding-left:' + (10 + depth * 22) + 'px">' + tog + lbl + '</td>' + statCells(stats(g.rows), idx) + '</tr>');
+      // Hover tooltip with the full text, since long labels are cut off with "…"
+      const tip = lv === LV.case ? esc(g.key + ' — ' + (g.rows[0].subject || '')) : lbl.replace(/<[^>]+>/g, '');
+      const tog = leaf ? '<span class="tog-sp"></span>' : '<button class="tog' + (open ? ' open' : '') + '" data-t="' + idx + '" aria-expanded="' + open + '" aria-label="' + (open ? 'Collapse' : 'Expand') + '"></button>';
+      out.push('<tr class="d' + depth + (pid === selPid ? ' sel' : '') + '"><td style="padding-left:' + (16 + depth * 22) + 'px" title="' + tip + '">' + tog + lbl + '</td>' + statCells(g.s, idx) + '</tr>');
       if (open) walk(g.rows, depth + 1, p);
     }
   };
@@ -771,9 +908,9 @@ function exportXlsx(){
     return r;
   };
   const walk = (rs, depth, labels) => {
-    for (const g of group(rs, levels[depth])){
+    for (const g of sortGroups(group(rs, levels[depth]))){ // same order as on screen
       const l = labels.concat(plain(levels[depth], g.key));
-      aoa.push(line(levels[depth].name, l, stats(g.rows)));
+      aoa.push(line(levels[depth].name, l, g.s));
       if (depth < levels.length - 1) walk(g.rows, depth + 1, l);
     }
   };
@@ -835,11 +972,20 @@ document.addEventListener('keydown', e => {
 
 const hierSel = $('#hier');
 hierSel.innerHTML = Object.entries(HIERS).map(([k, h]) => '<option value="' + k + '">' + esc(h.label) + '</option>').join('');
+hierSel.value = state.hier;
 hierSel.addEventListener('change', () => { state.hier = hierSel.value; state.expanded.clear(); state.sel = null; renderAll(); });
 $('#expand').addEventListener('click', expandLevel);
 $('#collapse').addEventListener('click', () => { state.expanded.clear(); renderMatrix(filteredRows()); });
 
 $('#matrix').addEventListener('click', e => {
+  // Column header: ascending, then descending, then back to name order
+  const th = e.target.closest('th[data-mcol]');
+  if (th){
+    const col = th.dataset.mcol, sla = th.dataset.msla, m = state.msort;
+    state.msort = m && m.col === col && m.sla === sla ? (m.dir > 0 ? {col, sla, dir:-1} : null) : {col, sla, dir:1};
+    renderMatrix(filteredRows());
+    return;
+  }
   const t = e.target.closest('.tog');
   if (t){
     const pid = state.paths[+t.dataset.t].join('\u0001');
@@ -874,6 +1020,21 @@ $('#casesCard').addEventListener('click', e => {
   if (e.target.id === 'clearSel'){ state.sel = null; const rows = filteredRows(); renderMatrix(rows); renderCases(rows); }
 });
 $('#more').addEventListener('click', () => { state.limit += 500; renderCases(filteredRows()); });
+
+// Nav links: on the website (or the local preview) go to that site's own landing page.
+// Opened as an offline file, they keep the full web address.
+if (/^https?:$/.test(location.protocol)){
+  document.querySelectorAll('a[data-site-path]').forEach(a => { a.href = a.dataset.sitePath; });
+}
+
+// Light/dark toggle: flip the current look (saved choice, or the system setting) and remember it
+$('#themeBtn').addEventListener('click', () => {
+  const root = document.documentElement;
+  const current = root.dataset.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+  const next = current === 'dark' ? 'light' : 'dark';
+  root.dataset.theme = next;
+  try { localStorage.setItem('theme', next); } catch (e) {}
+});
 
 window.__slaLoadFiles = loadFiles; // used by the build self-test
 renderAll();
