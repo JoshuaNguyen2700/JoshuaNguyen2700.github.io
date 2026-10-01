@@ -35,7 +35,7 @@ function thisWeek() {
   const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
   return { key: y * 100 + week, week, year: y, mon, sun };
 }
-const nowTag = '<span class="nowtag">this week</span>';
+const nowTag = '<span class="nowtag">Week In-Progress</span>';
 const partTag = '<span class="parttag">partial week</span>';
 // A week is incomplete when it is the week in progress (or later), or when New Year cuts it short
 // (Excel's WEEKNUM splits Dec 29 - Jan 4 into W53 and W1). Such weeks are drawn faded or dashed.
@@ -44,7 +44,7 @@ function isPartial(k) {
   const start = jan1 - ((new Date(jan1).getUTCDay() + 6) % 7) * DAY + 7 * (w - 1) * DAY;
   return start < jan1 || start + 6 * DAY > Date.UTC(y, 11, 31) || k >= thisWeek().key;
 }
-const partNote = (k) => (isPartial(k) ? `<div class="tnote">${k >= thisWeek().key ? 'Week in progress' : 'Partial week (split by New Year)'}</div>` : '');
+const partNote = (k) => (isPartial(k) ? `<div class="tnote">${k >= thisWeek().key ? 'Week In-Progress' : 'Partial week (split by New Year)'}</div>` : '');
 const sortedKeys = (m) => [...m.keys()].sort((a, b) => a - b);
 const multiYear = (keys) => new Set(keys.map((k) => Math.floor(k / 100))).size > 1;
 const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
@@ -464,7 +464,7 @@ function matrix(target, moreTarget, facts, col, mode, opts = {}) {
   };
   const all = { h: 0, gl: 0, nl: 0 }; for (const v of colT.values()) { all.h += v.h; all.gl += v.gl; all.nl += v.nl; }
   const tot = (html) => html.replace(/^<td( class="([^"]*)")?/, (m0, a, cls) => `<td class="tot${cls ? ' ' + cls : ''}"`);   // frozen Total column
-  const wkHead = (w) => w === thisWeek().key ? `<th class="now" title="This week">${wkLabel(w, multi)}</th>`
+  const wkHead = (w) => w === thisWeek().key ? `<th class="now" title="Week In-Progress">${wkLabel(w, multi)}</th>`
     : isPartial(w) ? `<th class="part" title="Partial week">${wkLabel(w, multi)}</th>` : `<th>${wkLabel(w, multi)}</th>`;
   let h = `<table class="mx"><thead><tr><th>${dimKey === 'cust' ? 'Customer' : 'CSR'}</th><th class="tot">Total</th>${weeks.map(wkHead).join('')}</tr></thead><tbody>`;
   for (const k of keys) {
