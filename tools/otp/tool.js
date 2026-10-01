@@ -68,8 +68,15 @@ function validate(d) {
   return d;
 }
 
+// Region names as the team uses them. Applied on load, so saved data files and the Python
+// script's output show the same names.
+const REGION_NAMES = { 'COSTCO': 'COSTCO+', 'APPLE/DELL': 'APPLE/DELL+' };
+const regionLabel = (n) => REGION_NAMES[n] || n;
+
 function load(d) {
   DATA = validate(d);
+  DATA.dims.region = DATA.dims.region.map(regionLabel);
+  if (DATA.checks) DATA.checks = Object.fromEntries(Object.entries(DATA.checks).map(([k, v]) => [regionLabel(k), v]));
   dims = DATA.dims; NR = dims.region.length;
   const vol = new Map();
   for (const t of [DATA.pod, DATA.ship]) for (const r of t) { const k = r[4] * 100 + r[6]; vol.set(k, (vol.get(k) || 0) + r[7]); }
