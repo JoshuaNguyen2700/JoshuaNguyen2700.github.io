@@ -348,7 +348,7 @@ function delayChart(el) {
 function pctCell(p, h, metric) {
   const late = 1 - p;
   const a = (metric === 'net' ? Math.min(1, late / 0.05) : Math.min(1, late)) * 0.5;
-  return `<td class="${h < 5 ? 'thin' : ''}" style="background:rgb(var(--crit-rgb) / ${a.toFixed(3)})">${fmtP(p, metric === 'net' ? 1 : 0)}</td>`;
+  return `<td class="${h < 5 ? 'thin' : ''}" style="background-image:linear-gradient(rgb(var(--crit-rgb) / ${a.toFixed(3)}),rgb(var(--crit-rgb) / ${a.toFixed(3)}))">${fmtP(p, metric === 'net' ? 1 : 0)}</td>`;
 }
 
 function weekTable() {
