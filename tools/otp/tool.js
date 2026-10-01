@@ -1,6 +1,7 @@
 // Logic for the otp tool only. It is an ES module, so nothing here leaks into other pages.
-// The page ships with no shipment data. The visitor opens otp_dashboard_data.json (made by
-// build_otp_dashboard.py from the regional Excel exports); it is read in the browser and never uploaded.
+// The page ships with no shipment data. The visitor picks the regional Excel exports (.xlsx); worker.js
+// reads them in the browser with parse.js (nothing is uploaded). A saved data file (.json, from
+// "Save data file" or build_otp_dashboard.py) opens instantly instead.
 import { esc } from '/assets/core/util.js';
 
 const $ = (s) => document.querySelector(s);
@@ -30,7 +31,7 @@ const saveState = () => { try { localStorage.setItem(STATE_KEY, JSON.stringify(S
 function validate(d) {
   const ok = d && d.dims && Array.isArray(d.pod) && Array.isArray(d.ship) && Array.isArray(d.delay) &&
     ['region', 'cust', 'account', 'csr', 'delay'].every((k) => Array.isArray(d.dims[k]));
-  if (!ok) throw new Error('This is not an OTP data file. Open otp_dashboard_data.json from the folder where you ran build_otp_dashboard.py.');
+  if (!ok) throw new Error('This is not an OTP data file. Choose the region Excel files, or a data file saved from this page.');
   return d;
 }
 
@@ -51,29 +52,88 @@ function load(d, { remember, raw } = {}) {
   if (!S.regions.length) S.regions = defaults().regions;
   if (remember && raw) { try { localStorage.setItem(DATA_KEY, raw); } catch (e) { $('#remember').checked = false; } }
 
-  $('#start').hidden = true; $('#app').hidden = false;
+  show('app');
+  const skipped = DATA.skipped || [];
+  $('#notice').hidden = !skipped.length;
+  $('#notice').textContent = skipped.length ? 'Skipped: ' + skipped.map((s) => `${s.file} ${s.reason}`).join('; ') + '.' : '';
   $('#meta').innerHTML = `Data built ${esc(DATA.generated || '?')} · ${fmtN(Object.values(DATA.checks || {}).reduce((s, v) => s + (v.rows || 0), 0))} HAWB rows · ${(DATA.sources || []).length} files`;
   buildFilters(); aggregate(); setTab(S.tab);
 }
 
-// ---------- opening a file ----------
-function showStartError(msg) { const e = $('#startError'); e.textContent = msg; e.hidden = !msg; }
-function readFile(file) {
-  if (!file) return;
+// ---------- opening files ----------
+function show(view) { for (const v of ['start', 'progress', 'app']) $('#' + v).hidden = v !== view; if (view !== 'app') hideTip(); }
+function showStartError(msg) { const e = $('#startError'); e.textContent = msg; e.hidden = !msg; if (msg) show(DATA ? 'app' : 'start'); }
+const remembering = () => $('#remember').checked;
+
+function readJson(file) {
   const fr = new FileReader();
   fr.onload = () => {
-    try { load(JSON.parse(fr.result), { remember: $('#remember').checked, raw: fr.result }); showStartError(''); }
-    catch (e) { $('#app').hidden = true; $('#start').hidden = false; showStartError(e instanceof SyntaxError ? 'That file could not be read as JSON.' : e.message); }
+    try { load(JSON.parse(fr.result), { remember: remembering(), raw: fr.result }); showStartError(''); }
+    catch (e) { DATA = null; showStartError(e instanceof SyntaxError ? 'That file could not be read as a data file.' : e.message); }
   };
   fr.onerror = () => showStartError('That file could not be opened.');
   fr.readAsText(file);
 }
-$('#fileInput').addEventListener('change', (e) => { readFile(e.target.files[0]); e.target.value = ''; });
+
+let worker = null;
+function readExcel(files) {
+  if (typeof DecompressionStream === 'undefined' || typeof Worker === 'undefined') {
+    showStartError('This browser cannot read Excel files directly. Use a current version of Edge, Chrome, Firefox or Safari.');
+    return;
+  }
+  showStartError('');
+  const list = $('#progressList'), rows = new Map();
+  list.innerHTML = '';
+  for (const f of files) {
+    const li = document.createElement('li');
+    li.innerHTML = `<div class="pf"><b>${esc(f.name)}</b><span>Waiting</span></div><div class="bar"><i></i></div>`;
+    list.append(li); rows.set(f.name, li);
+  }
+  show('progress');
+  if (worker) worker.terminate();
+  worker = new Worker(new URL('worker.js', import.meta.url), { type: 'module' });
+  worker.onmessage = (e) => {
+    const m = e.data;
+    if (m.type === 'progress') {
+      const li = rows.get(m.file); if (!li) return;
+      li.querySelector('span').textContent = m.rows != null ? `${fmtN(m.rows)} shipments` : m.stage;
+      li.querySelector('i').style.width = m.pct + '%';
+      li.classList.toggle('skip', !!m.skipped);
+    } else {
+      worker.terminate(); worker = null;
+      if (m.type === 'done') { try { load(m.data, { remember: remembering(), raw: remembering() ? JSON.stringify(m.data) : null }); } catch (err) { showStartError(err.message); } }
+      else showStartError(m.message);
+    }
+  };
+  worker.onerror = (e) => { worker && worker.terminate(); worker = null; showStartError('Reading the files failed: ' + (e.message || 'unknown error') + '.'); };
+  worker.postMessage({ files });
+}
+
+// One entry point for the file pickers and drag-and-drop: Excel files are read, a .json opens directly.
+function openFiles(fileList) {
+  const files = [...(fileList || [])];
+  if (!files.length) return;
+  const json = files.find((f) => /\.json$/i.test(f.name));
+  if (json && files.length === 1) return readJson(json);
+  readExcel(files.filter((f) => !/\.json$/i.test(f.name)));
+}
+$('#xlsxInput').addEventListener('change', (e) => { openFiles(e.target.files); e.target.value = ''; });
+$('#fileInput').addEventListener('change', (e) => { openFiles(e.target.files); e.target.value = ''; });
+$('#cancelBtn').addEventListener('click', () => { if (worker) { worker.terminate(); worker = null; } show(DATA ? 'app' : 'start'); });
 let dragDepth = 0;
 document.addEventListener('dragenter', (e) => { if ([...(e.dataTransfer?.types || [])].includes('Files')) { e.preventDefault(); dragDepth++; document.body.classList.add('dragging'); } });
 document.addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove('dragging'); } });
 document.addEventListener('dragover', (e) => e.preventDefault());
-document.addEventListener('drop', (e) => { e.preventDefault(); dragDepth = 0; document.body.classList.remove('dragging'); readFile(e.dataTransfer?.files?.[0]); });
+document.addEventListener('drop', (e) => { e.preventDefault(); dragDepth = 0; document.body.classList.remove('dragging'); if (!worker) openFiles(e.dataTransfer?.files); });
+
+$('#saveBtn').addEventListener('click', () => {
+  if (!DATA) return;
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(DATA)], { type: 'application/json' }));
+  a.download = 'otp_dashboard_data.json';
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+});
 $('#remember').addEventListener('change', (e) => {
   try { if (!e.target.checked) localStorage.removeItem(DATA_KEY); else if (DATA) localStorage.setItem(DATA_KEY, JSON.stringify(DATA)); }
   catch (err) { e.target.checked = false; }
@@ -81,7 +141,7 @@ $('#remember').addEventListener('change', (e) => {
 $('#forgetBtn').addEventListener('click', () => {
   try { localStorage.removeItem(DATA_KEY); } catch (e) {}
   DATA = null; A = null; $('#remember').checked = false;
-  $('#app').hidden = true; $('#start').hidden = false; hideTip();
+  show('start');
 });
 
 // ---------- filters ----------
@@ -413,7 +473,7 @@ function about() {
   }).join('');
   $('#about').innerHTML = `
     <h2>How the numbers are calculated</h2>
-    <p>build_otp_dashboard.py reads each region file and recalculates the formula columns the same way the workbooks do:</p>
+    <p>The page reads each region file and recalculates the formula columns the same way the workbooks do:</p>
     <ul>
       <li><b>SLA adjusted</b> = first digit of <code>Transit Time</code>, +1 if the destination zone is not A–E, +1 if the origin zone is not A–E.</li>
       <li><b>Due date adjusted</b> = <code>WORKDAY(Ship Date, SLA adjusted, holidays)</code> using the holiday list on each file's CSR tab.</li>

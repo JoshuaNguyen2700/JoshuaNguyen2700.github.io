@@ -26,6 +26,24 @@
 .otp-privacy{font-size:14px !important;margin-top:14px !important}
 .otp-error{color:var(--crit) !important;font-size:15px !important}
 
+.otp-start label.link{cursor:pointer;color:var(--link)}
+.otp-start label.link:hover{text-decoration:underline}
+
+/* ---- progress while reading Excel files ---- */
+.otp-progress{max-width:640px;margin:0 auto;padding:72px var(--gutter) 64px;display:grid;gap:12px}
+.otp-progress h2{margin:0;font-size:28px;font-weight:700;letter-spacing:-.02em}
+.otp-progress ul{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:14px}
+.otp-progress li{display:grid;gap:5px;font-size:15px}
+.otp-progress .pf{display:flex;justify-content:space-between;gap:12px;min-width:0}
+.otp-progress .pf b{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.otp-progress .pf span{color:var(--muted);font-size:13px;text-align:right}
+.otp-progress .bar{height:6px;border-radius:3px;background:var(--o-grid);overflow:hidden}
+.otp-progress .bar i{display:block;height:100%;width:0;background:var(--accent);border-radius:3px;transition:width .2s ease}
+.otp-progress li.skip .bar i{background:var(--o-axis)}
+.otp-progress li.skip .pf span{color:var(--crit)}
+.otp-progress button{justify-self:start}
+.otp-notice{margin:0;font-size:13px;color:var(--crit)}
+
 /* ---- app frame (wider than the bus max-width; this is a data tool) ---- */
 .otp{max-width:1320px;margin:0 auto;padding:24px var(--gutter) 64px;display:grid;gap:18px;font-size:14px;letter-spacing:-.005em;line-height:1.45}
 .otp h1{margin:0;font-size:clamp(28px,4vw,40px);line-height:1.1;font-weight:700;letter-spacing:-.025em}
@@ -121,3 +139,4 @@
   .otp select{max-width:160px}
   .otp-filters{position:static}
 }
+@media (prefers-reduced-motion:reduce){ .otp-progress .bar i{transition:none} }

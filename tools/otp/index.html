@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>OTP Dashboard · Joshua Nguyen</title>
-<meta name="description" content="Weekly on-time delivery by region, customer and CSR. Your data file opens in the browser and is never uploaded.">
+<meta name="description" content="Weekly on-time delivery by region, customer and CSR, read straight from your Excel exports. Files stay on your computer.">
 <!-- Shared bus: absolute paths. This tool's own files: relative paths. -->
 <link rel="stylesheet" href="/assets/bus.css">
 <script src="/assets/core/theme.js"></script>
@@ -14,19 +14,28 @@
 <header data-shell="nav"></header>
 
 <main>
-  <!-- Shown until a data file is opened. No shipment data is ever stored in this website. -->
+  <!-- Shown until files are opened. No shipment data is ever stored in this website. -->
   <section class="hero otp-start" id="start">
     <div class="eyebrow">Available now</div>
     <h1>OTP Dashboard</h1>
-    <p>Weekly on-time delivery by region, customer and CSR. Open the data file made by <code>build_otp_dashboard.py</code> to begin.</p>
+    <p>Weekly on-time delivery by region, customer and CSR. Choose your regional Excel exports (.xlsx) to begin.</p>
     <div class="actions">
-      <label class="btn" for="fileInput">Open data file</label>
-      <a class="link" href="/">Back to Home</a>
+      <label class="btn" for="xlsxInput">Choose Excel files</label>
+      <label class="link" for="fileInput">Open a saved data file</label>
     </div>
-    <div class="otp-drop" id="drop">or drop <b>otp_dashboard_data.json</b> here</div>
-    <p class="otp-privacy">The file is read by your browser on this computer. Nothing is uploaded or published.</p>
+    <div class="otp-drop" id="drop">or drop the .xlsx files here. Pick several at once to see every region together.</div>
+    <p class="otp-privacy">Your files stay on this computer. The browser reads them directly and nothing is sent anywhere.</p>
     <p class="otp-error" id="startError" role="alert" hidden></p>
   </section>
+
+  <!-- Progress while the Excel files are read -->
+  <section class="otp-progress" id="progress" hidden aria-live="polite">
+    <h2>Reading your files</h2>
+    <p class="sub">Large exports take 5 to 15 seconds each. Keep this tab open.</p>
+    <ul id="progressList"></ul>
+    <button class="otp-linkbtn" id="cancelBtn" type="button">Cancel</button>
+  </section>
+  <input type="file" id="xlsxInput" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple hidden>
   <input type="file" id="fileInput" accept=".json,application/json" hidden>
 
   <div class="otp" id="app" hidden>
@@ -38,12 +47,14 @@
       <div class="otp-meta">
         <div id="meta"></div>
         <div class="otp-meta-actions">
-          <label class="otp-linkbtn" for="fileInput">Open another file</label>
+          <label class="otp-linkbtn" for="xlsxInput">Load new Excel files</label>
+          <button class="otp-linkbtn" id="saveBtn" type="button">Save data file</button>
           <label class="otp-check"><input type="checkbox" id="remember"> Remember on this computer</label>
           <button class="otp-linkbtn" id="forgetBtn" type="button">Close data</button>
         </div>
       </div>
     </header>
+    <p class="otp-notice" id="notice" hidden></p>
 
     <section class="otp-filters" aria-label="Filters">
       <div class="frow">
