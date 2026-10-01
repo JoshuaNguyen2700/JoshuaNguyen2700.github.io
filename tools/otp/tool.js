@@ -5,7 +5,7 @@
 import { esc } from '/assets/core/util.js';
 
 const $ = (s) => document.querySelector(s);
-const DATA_KEY = 'otp.data';     // optional copy of the last file, only when "Remember" is ticked
+const OLD_DATA_KEY = 'otp.data'; // copy kept by the old "Remember" option; deleted on load
 const STATE_KEY = 'otp.state';   // filters and tab
 
 // ---------- formatting ----------
@@ -35,7 +35,7 @@ function validate(d) {
   return d;
 }
 
-function load(d, { remember, raw } = {}) {
+function load(d) {
   DATA = validate(d);
   dims = DATA.dims; NR = dims.region.length;
   const vol = new Map();
@@ -50,7 +50,6 @@ function load(d, { remember, raw } = {}) {
   } catch (e) {}
   S.regions = (Array.isArray(S.regions) ? S.regions : []).filter((i) => Number.isInteger(i) && i >= 0 && i < NR);
   if (!S.regions.length) S.regions = defaults().regions;
-  if (remember && raw) { try { localStorage.setItem(DATA_KEY, raw); } catch (e) { $('#remember').checked = false; } }
 
   show('app');
   updateBanner();
@@ -64,18 +63,15 @@ function load(d, { remember, raw } = {}) {
 // ---------- opening files ----------
 function show(view) { for (const v of ['start', 'progress', 'app']) $('#' + v).hidden = v !== view; if (view !== 'app') hideTip(); }
 function showStartError(msg) { const e = $('#startError'); e.textContent = msg; e.hidden = !msg; if (msg) show(DATA ? 'app' : 'start'); }
-const remembering = () => $('#remember').checked;
-// Tells the viewer whether their data survives a refresh.
+// Data lives only in this page's memory, so tell the viewer a refresh clears it.
 function updateBanner() {
-  $('#banner').innerHTML = remembering()
-    ? '<span><b>Your data is saved in this browser only.</b> It reopens on this computer until you click Close data. Nothing is sent anywhere.</span>'
-    : '<span><b>Your data is not saved.</b> If you refresh or close this page, you will need to load the Excel files again. To skip that next time, click Save data file and open it later, or tick Remember on this computer.</span>';
+  $('#banner').innerHTML = '<span><b>Your data is not saved.</b> If you refresh or close this page, you will need to load the Excel files again. To skip that next time, click Save data file and open that file later.</span>';
 }
 
 function readJson(file) {
   const fr = new FileReader();
   fr.onload = () => {
-    try { load(JSON.parse(fr.result), { remember: remembering(), raw: fr.result }); showStartError(''); }
+    try { load(JSON.parse(fr.result)); showStartError(''); }
     catch (e) { DATA = null; showStartError(e instanceof SyntaxError ? 'That file could not be read as a data file.' : e.message); }
   };
   fr.onerror = () => showStartError('That file could not be opened.');
@@ -108,7 +104,7 @@ function readExcel(files) {
       li.classList.toggle('skip', !!m.skipped);
     } else {
       worker.terminate(); worker = null;
-      if (m.type === 'done') { try { load(m.data, { remember: remembering(), raw: remembering() ? JSON.stringify(m.data) : null }); } catch (err) { showStartError(err.message); } }
+      if (m.type === 'done') { try { load(m.data); } catch (err) { showStartError(err.message); } }
       else showStartError(m.message);
     }
   };
@@ -141,14 +137,8 @@ $('#saveBtn').addEventListener('click', () => {
   document.body.append(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 4000);
 });
-$('#remember').addEventListener('change', (e) => {
-  try { if (!e.target.checked) localStorage.removeItem(DATA_KEY); else if (DATA) localStorage.setItem(DATA_KEY, JSON.stringify(DATA)); }
-  catch (err) { e.target.checked = false; }
-  updateBanner();
-});
 $('#forgetBtn').addEventListener('click', () => {
-  try { localStorage.removeItem(DATA_KEY); } catch (e) {}
-  DATA = null; A = null; $('#remember').checked = false;
+  DATA = null; A = null;
   show('start');
 });
 
@@ -512,8 +502,5 @@ new ResizeObserver((en) => { const w = Math.round(en[0].contentRect.width); if (
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', render);
 new MutationObserver(render).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 
-// ---------- reopen the remembered file, if any ----------
-try {
-  const raw = localStorage.getItem(DATA_KEY);
-  if (raw) { $('#remember').checked = true; load(JSON.parse(raw)); }
-} catch (e) { try { localStorage.removeItem(DATA_KEY); } catch (_) {} }
+// ---------- clear any copy saved by the removed "Remember on this computer" option ----------
+try { localStorage.removeItem(OLD_DATA_KEY); } catch (e) {}
