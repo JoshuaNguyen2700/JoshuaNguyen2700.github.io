@@ -16,6 +16,16 @@ const fmt$c = (n) => n >= 1e6 ? '$' + (n / 1e6).toFixed(2) + 'M' : n >= 1e3 ? '$
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const ymLabel = (k) => MON[(k % 100) - 1] + ' ' + Math.floor(k / 100);
 const wkLabel = (k, multi) => 'W' + (k % 100) + (multi ? ' ’' + String(Math.floor(k / 100)).slice(2) : '');
+// The calendar week today falls in, numbered like Excel's WEEKNUM(date, 2) (weeks start Monday,
+// week 1 contains Jan 1). Uses the viewer's own clock, so it rolls over each Monday.
+function thisWeek() {
+  const now = new Date(), y = now.getFullYear(), today = new Date(y, now.getMonth(), now.getDate()), jan1 = new Date(y, 0, 1);
+  const yday = Math.round((today - jan1) / 864e5) + 1, week = Math.floor((yday + (jan1.getDay() + 6) % 7 - 1) / 7) + 1;
+  const mon = new Date(today); mon.setDate(today.getDate() - (today.getDay() + 6) % 7);
+  const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+  return { key: y * 100 + week, week, year: y, mon, sun };
+}
+const nowTag = '<span class="nowtag">this week</span>';
 const sortedKeys = (m) => [...m.keys()].sort((a, b) => a - b);
 const multiYear = (keys) => new Set(keys.map((k) => Math.floor(k / 100))).size > 1;
 const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
@@ -358,7 +368,7 @@ function weekTable() {
   if (!keys.length) { $('#tWeek').innerHTML = emptyMsg('No delivered shipments for these filters.'); return; }
   const line = (label, w) => `<td>${label}</td><td>${fmtN(w.h)}</td><td>${fmt$(w.rev)}</td><td>${fmtN(w.gl)}</td><td>${fmtN(w.nl)}</td><td>${fmtP(1 - w.gl / w.h)}</td><td>${fmtP(1 - w.nl / w.h, 2)}</td>`;
   $('#tWeek').innerHTML = `<table><thead><tr><th>POD week</th><th>HAWBs</th><th>Total revenue</th><th>Gross late</th><th>Net late</th><th>On-time gross %</th><th>On-time net %</th></tr></thead><tbody>` +
-    keys.map((k) => `<tr>${line(wkLabel(k, multi), A.podW.get(k))}</tr>`).join('') +
+    keys.map((k) => k === thisWeek().key ? `<tr class="now">${line(wkLabel(k, multi) + nowTag, A.podW.get(k))}</tr>` : `<tr>${line(wkLabel(k, multi), A.podW.get(k))}</tr>`).join('') +
     `<tr class="total">${line('Grand total', t)}</tr></tbody></table>`;
 }
 
@@ -395,7 +405,7 @@ function matrix(target, moreTarget, facts, col, mode, opts = {}) {
     return bold ? html.replace('<td', '<td style="font-weight:600"') : html;
   };
   const all = { h: 0, gl: 0, nl: 0 }; for (const v of colT.values()) { all.h += v.h; all.gl += v.gl; all.nl += v.nl; }
-  let h = `<table><thead><tr><th>${dimKey === 'cust' ? 'Customer' : 'CSR'}</th>${weeks.map((w) => `<th>${wkLabel(w, multi)}</th>`).join('')}<th>Total</th></tr></thead><tbody>`;
+  let h = `<table><thead><tr><th>${dimKey === 'cust' ? 'Customer' : 'CSR'}</th>${weeks.map((w) => `<th${w === thisWeek().key ? ' class="now" title="This week"' : ''}>${wkLabel(w, multi)}</th>`).join('')}<th>Total</th></tr></thead><tbody>`;
   for (const k of keys) {
     const reg = regionOf.get(k), name = esc(dims[dimKey][k]);
     h += `<tr data-k="${k}"><td title="${name}">${name}${showRegion && reg >= 0 ? `<span class="rtag">${esc(dims.region[reg])}</span>` : ''}</td>` +
@@ -668,9 +678,10 @@ function projections() {
   } });
 
   const lastShip = ship[ship.length - 1].k;
+  const tw = thisWeek(), isNowIdx = (i) => i === mondayIdx(tw.year, tw.week);
   const wkName = (h) => `${idxLabel(lastShip + h + 1)}, ${idxDate(lastShip + h + 1).getUTCFullYear()}`;
   $('#fcTable').innerHTML = `<table><thead><tr><th>Week of</th><th>HAWBs</th><th>range</th><th>Gross OTP</th><th>range</th><th>Net OTP</th><th>range</th><th>Revenue</th><th>range</th></tr></thead><tbody>` +
-    vol.out.map((p, h) => `<tr><td>${wkName(h)}</td><td>${fmtN(p.mid)}</td><td class="rng">${fmtN(p.lo)} – ${fmtN(p.hi)}</td>` +
+    vol.out.map((p, h) => `<tr${isNowIdx(lastShip + h + 1) ? ' class="now"' : ''}><td>${wkName(h)}${isNowIdx(lastShip + h + 1) ? nowTag : ''}</td><td>${fmtN(p.mid)}</td><td class="rng">${fmtN(p.lo)} – ${fmtN(p.hi)}</td>` +
       `<td>${fmtP(gross[h].mid)}</td><td class="rng">${fmtP(gross[h].lo)} – ${fmtP(gross[h].hi)}</td>` +
       `<td>${fmtP(net[h].mid, 2)}</td><td class="rng">${fmtP(net[h].lo, 1)} – ${fmtP(net[h].hi, 1)}</td>` +
       `<td>${fmt$(rev.out[h].mid)}</td><td class="rng">${fmt$(rev.out[h].lo)} – ${fmt$(rev.out[h].hi)}</td></tr>`).join('') +
@@ -679,8 +690,13 @@ function projections() {
 }
 
 // ---------- render ----------
+function renderThisWeek() {
+  const w = thisWeek(), f = (d, yr) => MON[d.getMonth()] + ' ' + d.getDate() + (yr ? ', ' + d.getFullYear() : '');
+  $('#thisWeek').innerHTML = `<b>Week ${w.week}</b><span>This week: ${f(w.mon, w.mon.getFullYear() !== w.sun.getFullYear())} – ${f(w.sun, true)}</span>`;
+}
 function render() {
   if (!A || $('#app').hidden) return;
+  renderThisWeek();
   if (S.tab === 'dash') { tiles(); otpChart(); shipChart('#cShip'); delayChart($('#cDelay')); regionTable(); weekTable(); }
   if (S.tab === 'otp') { segControl('#otpMetric', 'otpMetric'); matrix('#mOtp', '#mOtpMore', A.podRows, 1, 'otp', { metric: S.otpMetric, search: $('#otpSearch').value }); }
   if (S.tab === 'ship') { shipChart('#cShip2'); matrix('#mShip', '#mShipMore', A.shipRows, 1, 'count', { search: $('#shipSearch').value }); }
@@ -694,6 +710,9 @@ $('#shipSearch').addEventListener('input', render);
 let rz, lastW = 0;
 new ResizeObserver((en) => { const w = Math.round(en[0].contentRect.width); if (w === lastW) return; lastW = w; clearTimeout(rz); rz = setTimeout(render, 120); }).observe($('#app'));
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', render);
+// If the page stays open past midnight on Sunday, move the week badge and highlights to the new week.
+let shownWeek = thisWeek().key;
+setInterval(() => { const k = thisWeek().key; if (k !== shownWeek) { shownWeek = k; render(); } }, 60000);
 new MutationObserver(render).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 
 // ---------- clear any copy saved by the removed "Remember on this computer" option ----------
