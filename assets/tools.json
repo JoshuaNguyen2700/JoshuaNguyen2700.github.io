@@ -16,13 +16,6 @@
       "icon": "icon.svg"
     },
     {
-      "id": "tool-2",
-      "name": "Tool 2",
-      "blurb": "A new tool is on the way.",
-      "status": "soon",
-      "icon": "plus"
-    },
-    {
       "id": "tool-3",
       "name": "Tool 3",
       "blurb": "A new tool is on the way.",
@@ -39,6 +32,13 @@
     {
       "id": "tool-5",
       "name": "Tool 5",
+      "blurb": "A new tool is on the way.",
+      "status": "soon",
+      "icon": "plus"
+    },
+    {
+      "id": "tool-6",
+      "name": "Tool 6",
       "blurb": "A new tool is on the way.",
       "status": "soon",
       "icon": "plus"

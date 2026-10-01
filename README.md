@@ -12,8 +12,8 @@ what it needs without touching the others.
                 │ tools.json     the list of tools (one entry per tool)            │
                 └─────┬──────────────┬──────────────┬──────────────┬──────────────┘
                       │              │              │              │
-                 index.html     tools/sla/     tools/tool-2/   tools/<new>/
-                 (home page)    (sealed app)   (placeholder)   (next tool)
+                 index.html     tools/sla/     tools/otp/      tools/<new>/
+                 (home page)    (sealed app)   (bus tool)      (next tool)
 ```
 
 ## Add a tool
