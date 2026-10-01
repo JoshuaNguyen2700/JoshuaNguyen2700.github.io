@@ -18,6 +18,10 @@
   --s1:#3987e5; --s2:#d95926; --crit:#ff6961; --crit-rgb:255 69 58; --good:#30d158;
 }
 
+/* Panels, screens and the tooltip set their own display, which would override the browser's
+   [hidden] rule; keep hidden things hidden so only the active tab shows. */
+[hidden]{display:none !important}
+
 /* ---- start screen ---- */
 .otp-start code{font-size:.85em;background:var(--tile);padding:1px 6px;border-radius:6px}
 .otp-start label.btn{cursor:pointer}
