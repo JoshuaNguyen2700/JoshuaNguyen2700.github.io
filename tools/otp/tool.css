@@ -47,6 +47,11 @@
 .otp-progress li.skip .pf span{color:var(--crit)}
 .otp-progress button{justify-self:start}
 .otp-notice{margin:0;font-size:13px;color:var(--crit)}
+.otp-banner{margin:0;display:flex;gap:10px;align-items:flex-start;font-size:14px;line-height:1.45;color:var(--text);
+  background:color-mix(in srgb,var(--accent) 10%,var(--bg));border:1px solid color-mix(in srgb,var(--accent) 30%,transparent);border-radius:12px;padding:10px 14px}
+.otp-banner::before{content:"i";flex:none;display:inline-grid;place-items:center;width:18px;height:18px;margin-top:1px;border-radius:50%;
+  background:var(--accent);color:var(--accent-text);font-size:12px;font-weight:700;font-style:italic}
+.otp-banner b{font-weight:600}
 
 /* ---- app frame (wider than the bus max-width; this is a data tool) ---- */
 .otp{max-width:1320px;margin:0 auto;padding:24px var(--gutter) 64px;display:grid;gap:18px;font-size:14px;letter-spacing:-.005em;line-height:1.45}

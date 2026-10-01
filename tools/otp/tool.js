@@ -53,6 +53,7 @@ function load(d, { remember, raw } = {}) {
   if (remember && raw) { try { localStorage.setItem(DATA_KEY, raw); } catch (e) { $('#remember').checked = false; } }
 
   show('app');
+  updateBanner();
   const skipped = DATA.skipped || [];
   $('#notice').hidden = !skipped.length;
   $('#notice').textContent = skipped.length ? 'Skipped: ' + skipped.map((s) => `${s.file} ${s.reason}`).join('; ') + '.' : '';
@@ -64,6 +65,12 @@ function load(d, { remember, raw } = {}) {
 function show(view) { for (const v of ['start', 'progress', 'app']) $('#' + v).hidden = v !== view; if (view !== 'app') hideTip(); }
 function showStartError(msg) { const e = $('#startError'); e.textContent = msg; e.hidden = !msg; if (msg) show(DATA ? 'app' : 'start'); }
 const remembering = () => $('#remember').checked;
+// Tells the viewer whether their data survives a refresh.
+function updateBanner() {
+  $('#banner').innerHTML = remembering()
+    ? '<span><b>Your data is saved in this browser only.</b> It reopens on this computer until you click Close data. Nothing is sent anywhere.</span>'
+    : '<span><b>Your data is not saved.</b> If you refresh or close this page, you will need to load the Excel files again. To skip that next time, click Save data file and open it later, or tick Remember on this computer.</span>';
+}
 
 function readJson(file) {
   const fr = new FileReader();
@@ -137,6 +144,7 @@ $('#saveBtn').addEventListener('click', () => {
 $('#remember').addEventListener('change', (e) => {
   try { if (!e.target.checked) localStorage.removeItem(DATA_KEY); else if (DATA) localStorage.setItem(DATA_KEY, JSON.stringify(DATA)); }
   catch (err) { e.target.checked = false; }
+  updateBanner();
 });
 $('#forgetBtn').addEventListener('click', () => {
   try { localStorage.removeItem(DATA_KEY); } catch (e) {}
