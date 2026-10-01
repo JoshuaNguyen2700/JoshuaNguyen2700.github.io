@@ -16,7 +16,7 @@
 <main>
   <!-- Shown until files are opened. No shipment data is ever stored in this website. -->
   <section class="hero otp-start" id="start">
-    <div class="eyebrow">Available now</div>
+    <div class="eyebrow">Upload this week's regional exports</div>
     <h1>OTP Dashboard</h1>
     <p>Weekly on-time delivery by region, customer and CSR. Choose your regional Excel exports (.xlsx) to begin.</p>
     <div class="actions">
@@ -31,7 +31,7 @@
   <!-- Progress while the Excel files are read -->
   <section class="otp-progress" id="progress" hidden aria-live="polite">
     <h2>Reading your files</h2>
-    <p class="sub">Large exports take 5 to 15 seconds each. Keep this tab open.</p>
+    <p class="sub"><span id="progressCount"></span> Large exports take 5 to 15 seconds each. Keep this tab open.</p>
     <ul id="progressList"></ul>
     <button class="otp-linkbtn" id="cancelBtn" type="button">Cancel</button>
   </section>
@@ -48,7 +48,7 @@
       <div class="otp-meta">
         <div id="meta"></div>
         <div class="otp-meta-actions">
-          <label class="otp-linkbtn" for="xlsxInput">Load new Excel files</label>
+          <label class="otp-btn" for="xlsxInput">Load new Excel files</label>
           <button class="otp-linkbtn" id="saveBtn" type="button">Save data file</button>
           <button class="otp-linkbtn" id="forgetBtn" type="button">Close data</button>
         </div>
@@ -56,6 +56,11 @@
     </header>
     <p class="otp-banner" id="banner" role="note"></p>
     <p class="otp-notice" id="notice" hidden></p>
+
+    <!-- Compact filter summary that stays on screen once the full filter panel scrolls away -->
+    <div class="otp-mini" id="miniBar" hidden>
+      <div class="otp-mini-in"><span class="eyebrow">Filters</span><span id="miniSummary"></span><button class="otp-linkbtn" id="miniEdit" type="button">Change</button></div>
+    </div>
 
     <section class="otp-filters" aria-label="Filters">
       <div class="frow">
@@ -86,11 +91,12 @@
       <div class="grid2">
         <div class="card">
           <div class="card-h"><h2>Weekly OTP</h2><span class="sub">by POD week</span></div>
-          <div class="legend"><span><i style="background:var(--s1)"></i>Gross on-time %</span><span><i style="background:var(--s2)"></i>Net on-time %</span></div>
+          <div class="legend"><span><i style="background:var(--s1)"></i>Gross on-time %</span><span><i style="background:var(--s3)"></i>Net on-time %</span><span><i class="dash" style="--c:var(--o-axis)"></i>Incomplete week</span></div>
           <div class="chart" id="cOtp"></div>
         </div>
         <div class="card">
           <div class="card-h"><h2>HAWBs shipped per week</h2><span class="sub">by ship week</span></div>
+          <div class="legend"><span><i class="sq" style="background:var(--s1)"></i>HAWBs shipped</span><span><i class="sq" style="background:var(--s1);opacity:.35"></i>Incomplete week</span></div>
           <div class="chart" id="cShip"></div>
         </div>
       </div>
@@ -106,18 +112,18 @@
         </div>
       </div>
       <div class="card">
-        <div class="card-h"><h2>Weekly summary</h2><span class="sub">POD week · same layout as the DASHBOARD sheet</span></div>
+        <div class="card-h"><h2>Weekly summary</h2><span class="sub">by POD week, newest first</span></div>
         <div class="tscroll" id="tWeek"></div>
       </div>
     </section>
 
     <section class="panel" id="p-otp" role="tabpanel" aria-labelledby="tab-otp" hidden>
       <div class="card">
-        <div class="card-h"><h2>OTP by customer and POD week</h2><span class="sub">OTP CHART PIVOT</span></div>
+        <div class="card-h"><h2>OTP by customer and POD week</h2><span class="sub">opens at the newest week; scroll left for earlier weeks</span></div>
         <div class="tools">
           <div class="seg" id="otpMetric"></div>
           <input type="search" id="otpSearch" placeholder="Search customer" aria-label="Search customer">
-          <span class="note">Shading = share late. Hover a cell for HAWBs, gross and net.</span>
+          <span class="note">Darker red = more late. Grey text = under 5 HAWBs. Hover a cell for details.</span>
         </div>
         <div class="tscroll" id="mOtp"></div>
         <div class="tools" id="mOtpMore"></div>
@@ -126,11 +132,12 @@
 
     <section class="panel" id="p-ship" role="tabpanel" aria-labelledby="tab-ship" hidden>
       <div class="card">
-        <div class="card-h"><h2>HAWBs shipped per week</h2><span class="sub">SHIP NUMBER pivot</span></div>
+        <div class="card-h"><h2>HAWBs shipped per week</h2><span class="sub">by ship week</span></div>
+        <div class="legend"><span><i class="sq" style="background:var(--s1)"></i>HAWBs shipped</span><span><i class="sq" style="background:var(--s1);opacity:.35"></i>Incomplete week</span></div>
         <div class="chart" id="cShip2"></div>
       </div>
       <div class="card">
-        <div class="card-h"><h2>HAWB count by customer and ship week</h2></div>
+        <div class="card-h"><h2>HAWB count by customer and ship week</h2><span class="sub">opens at the newest week</span></div>
         <div class="tools"><input type="search" id="shipSearch" placeholder="Search customer" aria-label="Search customer"></div>
         <div class="tscroll" id="mShip"></div>
         <div class="tools" id="mShipMore"></div>
@@ -139,15 +146,15 @@
 
     <section class="panel" id="p-csr" role="tabpanel" aria-labelledby="tab-csr" hidden>
       <div class="card">
-        <div class="card-h"><h2>CSR summary</h2><span class="sub">tip: click region chips to leave a region out</span></div>
+        <div class="card-h"><h2>CSR summary</h2><span class="sub">people and teams, A to Z</span></div>
         <div class="tscroll" id="tCsr"></div>
       </div>
       <div class="card">
-        <div class="card-h"><h2>HAWB count by CSR and ship week</h2><span class="sub">CSR pivot, top table</span></div>
+        <div class="card-h"><h2>HAWB count by CSR and ship week</h2><span class="sub">opens at the newest week</span></div>
         <div class="tscroll" id="mCsrShip"></div>
       </div>
       <div class="card">
-        <div class="card-h"><h2>OTP by CSR and POD week</h2><span class="sub">CSR pivot, bottom table</span></div>
+        <div class="card-h"><h2>OTP by CSR and POD week</h2><span class="sub">opens at the newest week</span></div>
         <div class="tools"><div class="seg" id="csrMetric"></div></div>
         <div class="tscroll" id="mCsrOtp"></div>
       </div>
@@ -160,7 +167,7 @@
           <span class="note">Project next</span><div class="seg" id="fcHorizon"></div>
           <span class="note">Based on the last</span><div class="seg" id="fcBasis"></div>
         </div>
-        <p class="note" id="fcNote"></p>
+        <p class="fc-note" id="fcNote"></p>
       </div>
       <div class="tiles-k" id="fcTiles"></div>
       <div class="grid2">
@@ -171,7 +178,7 @@
         </div>
         <div class="card">
           <div class="card-h"><h2>On-time %</h2><span class="sub">actual and projected, by POD week</span></div>
-          <div class="legend"><span><i style="background:var(--s1)"></i>Gross on-time %</span><span><i style="background:var(--s2)"></i>Net on-time %</span><span><i class="dash" style="--c:var(--o-axis)"></i>Projected</span></div>
+          <div class="legend"><span><i style="background:var(--s1)"></i>Gross on-time %</span><span><i style="background:var(--s3)"></i>Net on-time %</span><span><i class="dash" style="--c:var(--o-axis)"></i>Projected</span></div>
           <div class="chart" id="fcOtp"></div>
         </div>
       </div>
@@ -181,7 +188,7 @@
         <div class="chart" id="fcRev"></div>
       </div>
       <div class="card">
-        <div class="card-h"><h2>Projected weeks</h2><span class="sub">each figure with its likely range</span></div>
+        <div class="card-h"><h2>Projected weeks</h2><span class="sub">likely range under each figure</span></div>
         <div class="tscroll" id="fcTable"></div>
       </div>
     </section>

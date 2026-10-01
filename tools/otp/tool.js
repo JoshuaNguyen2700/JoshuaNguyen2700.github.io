@@ -14,6 +14,16 @@ const fmtP = (p, d = 1) => (p == null || !isFinite(p) ? '–' : (p * 100).toFixe
 const fmt$ = (n) => '$' + Math.round(n).toLocaleString('en-US');
 const fmt$c = (n) => n >= 1e6 ? '$' + (n / 1e6).toFixed(2) + 'M' : n >= 1e3 ? '$' + (n / 1e3).toFixed(1) + 'K' : fmt$(n);
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const DAY = 86400000;
+// "2026-10-01 10:49" -> "Oct 1, 2026, 10:49 AM"
+function fmtBuilt(s) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})(?: (\d{2}):(\d{2}))?/.exec(s || '');
+  if (!m) return s || '?';
+  let out = `${MON[+m[2] - 1]} ${+m[3]}, ${m[1]}`;
+  if (m[4]) { const h = +m[4]; out += `, ${h % 12 || 12}:${m[5]} ${h < 12 ? 'AM' : 'PM'}`; }
+  return out;
+}
+const plural = (n, word) => `${fmtN(n)} ${word}${n === 1 ? '' : 's'}`;
 const ymLabel = (k) => MON[(k % 100) - 1] + ' ' + Math.floor(k / 100);
 const wkLabel = (k, multi) => 'W' + (k % 100) + (multi ? ' ’' + String(Math.floor(k / 100)).slice(2) : '');
 // The calendar week today falls in, numbered like Excel's WEEKNUM(date, 2) (weeks start Monday,
@@ -26,6 +36,15 @@ function thisWeek() {
   return { key: y * 100 + week, week, year: y, mon, sun };
 }
 const nowTag = '<span class="nowtag">this week</span>';
+const partTag = '<span class="parttag">partial week</span>';
+// A week is incomplete when it is the week in progress (or later), or when New Year cuts it short
+// (Excel's WEEKNUM splits Dec 29 - Jan 4 into W53 and W1). Such weeks are drawn faded or dashed.
+function isPartial(k) {
+  const y = Math.floor(k / 100), w = k % 100, jan1 = Date.UTC(y, 0, 1);
+  const start = jan1 - ((new Date(jan1).getUTCDay() + 6) % 7) * DAY + 7 * (w - 1) * DAY;
+  return start < jan1 || start + 6 * DAY > Date.UTC(y, 11, 31) || k >= thisWeek().key;
+}
+const partNote = (k) => (isPartial(k) ? `<div class="tnote">${k >= thisWeek().key ? 'Week in progress' : 'Partial week (split by New Year)'}</div>` : '');
 const sortedKeys = (m) => [...m.keys()].sort((a, b) => a - b);
 const multiYear = (keys) => new Set(keys.map((k) => Math.floor(k / 100))).size > 1;
 const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
@@ -70,16 +89,17 @@ function load(d) {
   const skipped = DATA.skipped || [];
   $('#notice').hidden = !skipped.length;
   $('#notice').textContent = skipped.length ? 'Skipped: ' + skipped.map((s) => `${s.file} ${s.reason}`).join('; ') + '.' : '';
-  $('#meta').innerHTML = `Data built ${esc(DATA.generated || '?')} · ${fmtN(Object.values(DATA.checks || {}).reduce((s, v) => s + (v.rows || 0), 0))} HAWB rows · ${(DATA.sources || []).length} files`;
-  buildFilters(); aggregate(); setTab(S.tab);
+  const nFiles = (DATA.sources || []).length, nRows = Object.values(DATA.checks || {}).reduce((s, v) => s + (v.rows || 0), 0);
+  $('#meta').innerHTML = `${plural(nRows, 'HAWB')} from ${plural(nFiles, 'file')} · built ${esc(fmtBuilt(DATA.generated))}`;
+  buildFilters(); aggregate(); renderMini(); setTab(S.tab);
 }
 
 // ---------- opening files ----------
-function show(view) { for (const v of ['start', 'progress', 'app']) $('#' + v).hidden = v !== view; if (view !== 'app') hideTip(); }
+function show(view) { for (const v of ['start', 'progress', 'app']) $('#' + v).hidden = v !== view; if (view !== 'app') { hideTip(); $('#miniBar').hidden = true; } }
 function showStartError(msg) { const e = $('#startError'); e.textContent = msg; e.hidden = !msg; if (msg) show(DATA ? 'app' : 'start'); }
 // Data lives only in this page's memory, so tell the viewer a refresh clears it.
 function updateBanner() {
-  $('#banner').innerHTML = '<span><b>Your data is not saved.</b> If you refresh or close this page, you will need to load the Excel files again. To skip that next time, click Save data file and open that file later.</span>';
+  $('#banner').innerHTML = '<span><b>Data is not saved.</b> Refreshing or closing this page clears it. Use Save data file to reopen it later without the Excel files.</span>';
 }
 
 function readJson(file) {
@@ -106,6 +126,8 @@ function readExcel(files) {
     li.innerHTML = `<div class="pf"><b>${esc(f.name)}</b><span>Waiting</span></div><div class="bar"><i></i></div>`;
     list.append(li); rows.set(f.name, li);
   }
+  const done = new Set(), count = () => { $('#progressCount').innerHTML = `<span class="otp-pcount">${done.size} of ${files.length} file${files.length === 1 ? '' : 's'} done.</span>`; };
+  count();
   show('progress');
   if (worker) worker.terminate();
   worker = new Worker(new URL('worker.js', import.meta.url), { type: 'module' });
@@ -116,6 +138,7 @@ function readExcel(files) {
       li.querySelector('span').textContent = m.rows != null ? `${fmtN(m.rows)} shipments` : m.stage;
       li.querySelector('i').style.width = m.pct + '%';
       li.classList.toggle('skip', !!m.skipped);
+      if (m.pct >= 100) { done.add(m.file); count(); }
     } else {
       worker.terminate(); worker = null;
       if (m.type === 'done') { try { load(m.data); } catch (err) { showStartError(err.message); } }
@@ -196,6 +219,25 @@ $('#fFrom').addEventListener('change', (e) => { S.from = +e.target.value; if (S.
 $('#fTo').addEventListener('change', (e) => { S.to = +e.target.value; if (S.to < S.from) { S.from = S.to; $('#fFrom').value = S.from; } update(); });
 $('#resetBtn').addEventListener('click', () => { const t = S.tab; S = defaults(); S.tab = t; buildFilters(); update(); });
 
+// One-line summary of the filters, shown in a slim bar once the filter panel scrolls off screen.
+function renderMini() {
+  if (!DATA) return;
+  const parts = [S.regions.length === NR ? 'All regions' : S.regions.map((i) => dims.region[i]).join(', ')];
+  if (S.account >= 0) parts.push(dims.account[S.account]);
+  if (S.csr >= 0) parts.push('CSR: ' + dims.csr[S.csr]);
+  if (S.cust >= 0) parts.push(dims.cust[S.cust]);
+  parts.push(S.from === S.to ? ymLabel(S.from) : `${ymLabel(S.from)} – ${ymLabel(S.to)}`);
+  $('#miniSummary').textContent = parts.join(' · ');
+}
+$('#miniEdit').addEventListener('click', () => {
+  const top = $('.otp-filters').getBoundingClientRect().top + window.scrollY - 64;
+  window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+});
+if (typeof IntersectionObserver !== 'undefined') {
+  new IntersectionObserver(([e]) => { $('#miniBar').hidden = e.isIntersecting || !DATA || $('#app').hidden; },
+    { rootMargin: '-48px 0px 0px 0px' }).observe($('.otp-filters'));
+}
+
 // ---------- tabs ----------
 function setTab(t) {
   S.tab = ['dash', 'otp', 'ship', 'csr', 'fc', 'about'].includes(t) ? t : 'dash';
@@ -260,32 +302,40 @@ function niceMax(v) { if (v <= 0) return 1; const p = Math.pow(10, Math.floor(Ma
 const topRoundedBar = (x, y, w, h, r) => { r = Math.min(r, w / 2, h); return `M${x},${y + h}V${y + r}Q${x},${y} ${x + r},${y}H${x + w - r}Q${x + w},${y} ${x + w},${y + r}V${y + h}Z`; };
 const rightRoundedBar = (x, y, w, h, r) => { r = Math.min(r, h / 2, w); return `M${x},${y}H${x + w - r}Q${x + w},${y} ${x + w},${y + r}V${y + h - r}Q${x + w},${y + h} ${x + w - r},${y + h}H${x}Z`; };
 const xTickEvery = (n, width) => Math.max(1, Math.ceil(n / Math.max(1, Math.floor(width / 44))));
-const T = () => ({ ink: css('--text'), ink2: css('--o-ink2'), muted: css('--muted'), grid: css('--o-grid'), axis: css('--o-axis'), card: css('--o-card'), s1: css('--s1'), s2: css('--s2') });
+const T = () => ({ ink: css('--text'), ink2: css('--o-ink2'), muted: css('--muted'), grid: css('--o-grid'), axis: css('--o-axis'), card: css('--o-card'), s1: css('--s1'), s2: css('--s2'), s3: css('--s3') });
 
 function lineChart(el, keys, series, tipFn) {
   el.innerHTML = '';
   if (!keys.length) { el.innerHTML = emptyMsg('No delivered shipments for these filters.'); return; }
-  const c = T(), W = el.clientWidth || 600, H = 260, m = { l: 40, r: 58, t: 14, b: 26 };
+  const c = T(), W = el.clientWidth || 600, H = 260, m = { l: 42, r: 62, t: 14, b: 28 };
   const iw = W - m.l - m.r, ih = H - m.t - m.b, n = keys.length, bw = iw / n, multi = multiYear(keys);
   const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, height: H, role: 'img', 'aria-label': 'Weekly gross and net on-time percentage' }, el);
   const X = (i) => m.l + (i + 0.5) * bw, Y = (v) => m.t + ih * (1 - v);
   for (const v of [0, .25, .5, .75, 1]) {
     svgEl('line', { x1: m.l, x2: W - m.r, y1: Y(v), y2: Y(v), stroke: v === 0 ? c.axis : c.grid, 'stroke-width': 1 }, svg);
-    svgEl('text', { x: m.l - 6, y: Y(v) + 4, 'text-anchor': 'end', 'font-size': 11, fill: c.muted }, svg).textContent = v * 100 + '%';
+    svgEl('text', { x: m.l - 6, y: Y(v) + 4, 'text-anchor': 'end', 'font-size': 12, fill: c.muted }, svg).textContent = v * 100 + '%';
   }
-  const every = xTickEvery(n, iw);
-  keys.forEach((k, i) => { if (i % every === 0) svgEl('text', { x: X(i), y: H - 8, 'text-anchor': 'middle', 'font-size': 11, fill: c.muted }, svg).textContent = wkLabel(k, multi); });
+  const every = xTickEvery(n, iw), part = keys.map(isPartial);
+  keys.forEach((k, i) => { if (i % every === 0) svgEl('text', { x: X(i), y: H - 8, 'text-anchor': 'middle', 'font-size': 12, fill: c.muted }, svg).textContent = wkLabel(k, multi); });
   for (const s of series) {
-    let d = '', pen = false;
-    s.values.forEach((v, i) => { if (v == null) { pen = false; return; } d += (pen ? 'L' : 'M') + X(i).toFixed(1) + ',' + Y(v).toFixed(1); pen = true; });
-    svgEl('path', { d, fill: 'none', stroke: s.color, 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }, svg);
+    // solid between complete weeks; dashed and lighter on any segment touching an incomplete week
+    let solid = '', dashed = '';
+    for (let i = 0; i < n; i++) {
+      const v = s.values[i]; if (v == null) continue;
+      const pv = i > 0 ? s.values[i - 1] : null, pt = X(i).toFixed(1) + ',' + Y(v).toFixed(1);
+      if (pv == null) { solid += 'M' + pt; continue; }
+      const seg = 'M' + X(i - 1).toFixed(1) + ',' + Y(pv).toFixed(1) + 'L' + pt;
+      if (part[i] || part[i - 1]) dashed += seg; else solid += seg;
+    }
+    svgEl('path', { d: solid, fill: 'none', stroke: s.color, 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }, svg);
+    if (dashed) svgEl('path', { d: dashed, fill: 'none', stroke: s.color, 'stroke-width': 2, 'stroke-dasharray': '4 4', opacity: 0.6, 'stroke-linecap': 'round' }, svg);
   }
-  const ends = series.map((s) => { const i = s.values.length - 1; return { s, v: s.values[i], y: Y(s.values[i] ?? 0), x: X(i) }; });
+  const ends = series.map((s) => { const i = s.values.length - 1; return { s, v: s.values[i], y: Y(s.values[i] ?? 0), x: X(i), part: part[i] }; });
   const collide = ends.length > 1 && Math.abs(ends[0].y - ends[1].y) < 16;
   for (const e of ends) {
     if (e.v == null) continue;
-    svgEl('circle', { cx: e.x, cy: e.y, r: 4, fill: e.s.color, stroke: c.card, 'stroke-width': 2 }, svg);
-    if (!collide) svgEl('text', { x: e.x + 8, y: e.y + 4, 'font-size': 11, 'font-weight': 600, fill: c.ink }, svg).textContent = fmtP(e.v, e.s.dec);
+    svgEl('circle', { cx: e.x, cy: e.y, r: 4, fill: e.part ? c.card : e.s.color, stroke: e.part ? e.s.color : c.card, 'stroke-width': 2 }, svg);
+    if (!collide) svgEl('text', { x: e.x + 8, y: e.y + 4, 'font-size': 12, 'font-weight': 600, fill: c.ink }, svg).textContent = fmtP(e.v, e.s.dec);
   }
   const guide = svgEl('line', { y1: m.t, y2: m.t + ih, stroke: c.axis, 'stroke-width': 1, visibility: 'hidden' }, svg);
   const dots = series.map((s) => svgEl('circle', { r: 4, fill: s.color, stroke: c.card, 'stroke-width': 2, visibility: 'hidden' }, svg));
@@ -303,7 +353,7 @@ function lineChart(el, keys, series, tipFn) {
 function columnChart(el, keys, values, tipFn) {
   el.innerHTML = '';
   if (!keys.length) { el.innerHTML = emptyMsg('No shipments for these filters.'); return; }
-  const c = T(), W = el.clientWidth || 600, H = 260, m = { l: 48, r: 12, t: 14, b: 26 };
+  const c = T(), W = el.clientWidth || 600, H = 260, m = { l: 50, r: 12, t: 14, b: 28 };
   const iw = W - m.l - m.r, ih = H - m.t - m.b, n = keys.length, bw = iw / n, multi = multiYear(keys);
   const max = niceMax(Math.max(...values));
   const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, height: H, role: 'img', 'aria-label': 'HAWBs shipped per week' }, el);
@@ -311,22 +361,22 @@ function columnChart(el, keys, values, tipFn) {
   for (let t = 0; t <= 4; t++) {
     const v = (max / 4) * t;
     svgEl('line', { x1: m.l, x2: W - m.r, y1: Y(v), y2: Y(v), stroke: t === 0 ? c.axis : c.grid, 'stroke-width': 1 }, svg);
-    svgEl('text', { x: m.l - 6, y: Y(v) + 4, 'text-anchor': 'end', 'font-size': 11, fill: c.muted }, svg).textContent = v >= 1000 ? (v / 1000).toFixed(v % 1000 ? 1 : 0) + 'K' : fmtN(v);
+    svgEl('text', { x: m.l - 6, y: Y(v) + 4, 'text-anchor': 'end', 'font-size': 12, fill: c.muted }, svg).textContent = v >= 1000 ? (v / 1000).toFixed(v % 1000 ? 1 : 0) + 'K' : fmtN(v);
   }
-  const every = xTickEvery(n, iw), bar = Math.max(2, Math.min(24, bw - 2)), bars = [];
+  const every = xTickEvery(n, iw), bar = Math.max(2, Math.min(24, bw - 2)), bars = [], base = keys.map((k) => (isPartial(k) ? 0.35 : 1));
   keys.forEach((k, i) => {
     const x = m.l + i * bw + (bw - bar) / 2, h = ih * (values[i] / max);
-    bars.push(svgEl('path', { d: topRoundedBar(x, Y(values[i]), bar, Math.max(h, 0.5), 4), fill: c.s1 }, svg));
-    if (i % every === 0) svgEl('text', { x: m.l + (i + 0.5) * bw, y: H - 8, 'text-anchor': 'middle', 'font-size': 11, fill: c.muted }, svg).textContent = wkLabel(k, multi);
+    bars.push(svgEl('path', { d: topRoundedBar(x, Y(values[i]), bar, Math.max(h, 0.5), 4), fill: c.s1, opacity: base[i] }, svg));
+    if (i % every === 0) svgEl('text', { x: m.l + (i + 0.5) * bw, y: H - 8, 'text-anchor': 'middle', 'font-size': 12, fill: c.muted }, svg).textContent = wkLabel(k, multi);
   });
   const hit = svgEl('rect', { x: m.l, y: m.t, width: iw, height: ih, fill: 'transparent' }, svg);
   hit.addEventListener('mousemove', (ev) => {
     const rect = svg.getBoundingClientRect(), sx = (ev.clientX - rect.left) * (W / rect.width);
     const i = Math.max(0, Math.min(n - 1, Math.floor((sx - m.l) / bw)));
-    bars.forEach((b, j) => b.setAttribute('opacity', j === i ? 1 : 0.55));
+    bars.forEach((b, j) => b.setAttribute('opacity', j === i ? base[j] : base[j] * 0.55));
     showTip(tipFn(i), ev);
   });
-  hit.addEventListener('mouseleave', () => { bars.forEach((b) => b.setAttribute('opacity', 1)); hideTip(); });
+  hit.addEventListener('mouseleave', () => { bars.forEach((b, j) => b.setAttribute('opacity', base[j])); hideTip(); });
 }
 
 function delayChart(el) {
@@ -341,7 +391,7 @@ function delayChart(el) {
   const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, height: H, role: 'img', 'aria-label': 'Share of late shipments by delay code' }, el);
   shown.forEach((it, i) => {
     const y = mt + i * rowH, bh = 14, by = y + (rowH - bh) / 2;
-    svgEl('text', { x: lw - 8, y: by + 11, 'text-anchor': 'end', 'font-size': 11.5, fill: c.ink2 }, svg).textContent = it.label.length > maxChars ? it.label.slice(0, maxChars - 1) + '…' : it.label;
+    svgEl('text', { x: lw - 8, y: by + 11, 'text-anchor': 'end', 'font-size': 12, fill: c.ink2 }, svg).textContent = it.label.length > maxChars ? it.label.slice(0, maxChars - 1) + '…' : it.label;
     const wC = iw * (it.c / total) / max, wU = iw * (it.u / total) / max;
     if (it.c && it.u) {
       svgEl('rect', { x: lw, y: by, width: Math.max(0, wC - 1), height: bh, fill: c.s2 }, svg);
@@ -349,7 +399,7 @@ function delayChart(el) {
     } else {
       svgEl('path', { d: rightRoundedBar(lw, by, Math.max(1.5, wC + wU), bh, 4), fill: it.c ? c.s2 : c.s1 }, svg);
     }
-    svgEl('text', { x: lw + wC + wU + 6, y: by + 11, 'font-size': 11, 'font-weight': 600, fill: c.ink }, svg).textContent = fmtP(it.t / total);
+    svgEl('text', { x: lw + wC + wU + 6, y: by + 11, 'font-size': 12, 'font-weight': 600, fill: c.ink }, svg).textContent = fmtP(it.t / total);
     const hit = svgEl('rect', { x: 0, y, width: W, height: rowH, fill: 'transparent' }, svg);
     hit.addEventListener('mousemove', (ev) => showTip(`<div class="tt">${esc(it.label)}</div>` + row('Late HAWBs', fmtN(it.t)) + row('Share of late', fmtP(it.t / total)) + row('Controllable', fmtN(it.c), c.s2) + row('Uncontrollable', fmtN(it.u), c.s1), ev));
     hit.addEventListener('mouseleave', hideTip);
@@ -360,7 +410,7 @@ function delayChart(el) {
 function pctCell(p, h, metric) {
   const late = 1 - p;
   const a = (metric === 'net' ? Math.min(1, late / 0.05) : Math.min(1, late)) * 0.5;
-  return `<td class="${h < 5 ? 'thin' : ''}" style="background-image:linear-gradient(rgb(var(--crit-rgb) / ${a.toFixed(3)}),rgb(var(--crit-rgb) / ${a.toFixed(3)}))">${fmtP(p, metric === 'net' ? 1 : 0)}</td>`;
+  return `<td class="${h < 5 ? 'thin' : ''}" style="background-image:linear-gradient(rgb(var(--crit-rgb) / ${a.toFixed(3)}),rgb(var(--crit-rgb) / ${a.toFixed(3)}))">${fmtP(p, metric === 'net' ? 2 : 1)}</td>`;
 }
 
 function weekTable() {
@@ -368,7 +418,8 @@ function weekTable() {
   if (!keys.length) { $('#tWeek').innerHTML = emptyMsg('No delivered shipments for these filters.'); return; }
   const line = (label, w) => `<td>${label}</td><td>${fmtN(w.h)}</td><td>${fmt$(w.rev)}</td><td>${fmtN(w.gl)}</td><td>${fmtN(w.nl)}</td><td>${fmtP(1 - w.gl / w.h)}</td><td>${fmtP(1 - w.nl / w.h, 2)}</td>`;
   $('#tWeek').innerHTML = `<table><thead><tr><th>POD week</th><th>HAWBs</th><th>Total revenue</th><th>Gross late</th><th>Net late</th><th>On-time gross %</th><th>On-time net %</th></tr></thead><tbody>` +
-    keys.map((k) => k === thisWeek().key ? `<tr class="now">${line(wkLabel(k, multi) + nowTag, A.podW.get(k))}</tr>` : `<tr>${line(wkLabel(k, multi), A.podW.get(k))}</tr>`).join('') +
+    keys.slice().reverse().map((k) => k === thisWeek().key ? `<tr class="now">${line(wkLabel(k, multi) + nowTag, A.podW.get(k))}</tr>`
+      : `<tr>${line(wkLabel(k, multi) + (isPartial(k) ? partTag : ''), A.podW.get(k))}</tr>`).join('') +
     `<tr class="total">${line('Grand total', t)}</tr></tbody></table>`;
 }
 
@@ -405,23 +456,28 @@ function matrix(target, moreTarget, facts, col, mode, opts = {}) {
     return bold ? html.replace('<td', '<td style="font-weight:600"') : html;
   };
   const all = { h: 0, gl: 0, nl: 0 }; for (const v of colT.values()) { all.h += v.h; all.gl += v.gl; all.nl += v.nl; }
-  let h = `<table><thead><tr><th>${dimKey === 'cust' ? 'Customer' : 'CSR'}</th>${weeks.map((w) => `<th${w === thisWeek().key ? ' class="now" title="This week"' : ''}>${wkLabel(w, multi)}</th>`).join('')}<th>Total</th></tr></thead><tbody>`;
+  const tot = (html) => html.replace(/^<td( class="([^"]*)")?/, (m0, a, cls) => `<td class="tot${cls ? ' ' + cls : ''}"`);   // frozen Total column
+  const wkHead = (w) => w === thisWeek().key ? `<th class="now" title="This week">${wkLabel(w, multi)}</th>`
+    : isPartial(w) ? `<th class="part" title="Partial week">${wkLabel(w, multi)}</th>` : `<th>${wkLabel(w, multi)}</th>`;
+  let h = `<table class="mx"><thead><tr><th>${dimKey === 'cust' ? 'Customer' : 'CSR'}</th><th class="tot">Total</th>${weeks.map(wkHead).join('')}</tr></thead><tbody>`;
   for (const k of keys) {
     const reg = regionOf.get(k), name = esc(dims[dimKey][k]);
     h += `<tr data-k="${k}"><td title="${name}">${name}${showRegion && reg >= 0 ? `<span class="rtag">${esc(dims.region[reg])}</span>` : ''}</td>` +
-      weeks.map((w) => cell(cells.get(k + '|' + w))).join('') + cell(rowsT.get(k), true) + '</tr>';
+      tot(cell(rowsT.get(k))) + weeks.map((w) => cell(cells.get(k + '|' + w))).join('') + '</tr>';
   }
-  h += `<tr class="total"><td>Grand total</td>${weeks.map((w) => cell(colT.get(w))).join('')}${cell(all)}</tr></tbody></table>`;
+  h += `<tr class="total"><td>Grand total</td>${tot(cell(all))}${weeks.map((w) => cell(colT.get(w))).join('')}</tr></tbody></table>`;
   el.innerHTML = h;
+  el.scrollLeft = el.scrollWidth;   // open at the newest week
   el.onmousemove = (ev) => {
     const td = ev.target.closest('td'); if (!td || td.cellIndex === 0) { hideTip(); return; }
-    const tr = td.parentElement, wi = td.cellIndex - 1, wk = wi < weeks.length ? weeks[wi] : null;
+    const tr = td.parentElement, wi = td.cellIndex - 2, wk = wi >= 0 ? weeks[wi] : null;
     let c, title;
     if (tr.classList.contains('total')) { c = wk == null ? all : colT.get(wk); title = 'All ' + (dimKey === 'cust' ? 'customers' : 'CSRs'); }
     else { const k = +tr.dataset.k; c = wk == null ? rowsT.get(k) : cells.get(k + '|' + wk); title = dims[dimKey][k]; }
     if (!c || !c.h) { hideTip(); return; }
     let body = `<div class="tt">${esc(title)}</div>` + row(wk == null ? 'Period' : (mode === 'count' ? 'Ship week' : 'POD week'), wk == null ? 'Total' : wkLabel(wk, true)) + row('HAWBs', fmtN(c.h));
     if (mode !== 'count') body += row('Gross late', fmtN(c.gl)) + row('Net late', fmtN(c.nl)) + row('On-time gross', fmtP(1 - c.gl / c.h)) + row('On-time net', fmtP(1 - c.nl / c.h, 2));
+    if (wk != null) body += partNote(wk);
     showTip(body, ev);
   };
   el.onmouseleave = hideTip;
@@ -466,14 +522,14 @@ function otpChart() {
   const keys = sortedKeys(A.podW), c = T();
   const gross = keys.map((k) => { const w = A.podW.get(k); return 1 - w.gl / w.h; });
   const net = keys.map((k) => { const w = A.podW.get(k); return 1 - w.nl / w.h; });
-  lineChart($('#cOtp'), keys, [{ values: gross, color: c.s1, dec: 0 }, { values: net, color: c.s2, dec: 1 }], (i) => {
+  lineChart($('#cOtp'), keys, [{ values: gross, color: c.s1, dec: 1 }, { values: net, color: c.s3, dec: 2 }], (i) => {
     const w = A.podW.get(keys[i]);
-    return `<div class="tt">POD ${wkLabel(keys[i], true)}</div>` + row('HAWBs', fmtN(w.h)) + row('Gross on-time', fmtP(gross[i]), c.s1) + row('Net on-time', fmtP(net[i], 2), c.s2) + row('Gross late', fmtN(w.gl)) + row('Net late', fmtN(w.nl));
+    return `<div class="tt">POD ${wkLabel(keys[i], true)}</div>` + row('HAWBs', fmtN(w.h)) + row('Gross on-time', fmtP(gross[i]), c.s1) + row('Net on-time', fmtP(net[i], 2), c.s3) + row('Gross late', fmtN(w.gl)) + row('Net late', fmtN(w.nl)) + partNote(keys[i]);
   });
 }
 function shipChart(sel) {
   const keys = sortedKeys(A.shipW), vals = keys.map((k) => A.shipW.get(k));
-  columnChart($(sel), keys, vals, (i) => `<div class="tt">Ship ${wkLabel(keys[i], true)}</div>` + row('HAWBs shipped', fmtN(vals[i])));
+  columnChart($(sel), keys, vals, (i) => `<div class="tt">Ship ${wkLabel(keys[i], true)}</div>` + row('HAWBs shipped', fmtN(vals[i])) + partNote(keys[i]));
 }
 
 function about() {
@@ -502,13 +558,12 @@ function about() {
       <li>There is less than a year of history, so seasonal peaks and holiday weeks are not built in. Treat projections as a guide for the next few weeks, not a budget.</li>
     </ul>
     ${checks ? `<h2>Source check</h2><ul>${checks}</ul>` : ''}
-    <p class="note">Data built ${esc(DATA.generated || '?')} from ${(DATA.sources || []).map(esc).join(', ')}.</p>`;
+    <p class="note">Data built ${esc(fmtBuilt(DATA.generated))} from ${(DATA.sources || []).map(esc).join(', ')}.</p>`;
 }
 
 // ---------- projections ----------
 // Weekly series ignore the month range (projections always start from the latest data) but use the
 // other filters. Weeks are keyed by their Monday, so the W53 and W1 halves of the New Year week merge.
-const DAY = 86400000;
 const FC_Z = 1.28;   // likely range covers about 8 in 10 weeks
 const FC_DAMP = 0.8; // the trend eases off further out instead of running away
 const mondayIdx = (y, w) => { const j = Date.UTC(y, 0, 1); return Math.round(((j - ((new Date(j).getUTCDay() + 6) % 7) * DAY + 7 * (w - 1) * DAY) / DAY - 4) / 7); };
@@ -575,7 +630,7 @@ function fcAxisLabel(v, pct, money) {
 // Actual line, then a dashed projection with its likely-range band, in a shaded "Projected" zone.
 function fcChart(el, keys, nActual, series, { pct = false, money = false, tip }) {
   el.innerHTML = '';
-  const c = T(), W = el.clientWidth || 600, H = 260, m = { l: pct ? 40 : 54, r: 14, t: 20, b: 26 };
+  const c = T(), W = el.clientWidth || 600, H = 260, m = { l: pct ? 42 : 56, r: 14, t: 20, b: 28 };
   const iw = W - m.l - m.r, ih = H - m.t - m.b, n = keys.length, bw = iw / n;
   let max = 1;
   if (!pct) { max = 0; for (const s of series) for (let i = 0; i < n; i++) max = Math.max(max, s.actual[i] ?? 0, s.hi[i] ?? 0); max = niceMax(max); }
@@ -586,12 +641,12 @@ function fcChart(el, keys, nActual, series, { pct = false, money = false, tip })
   for (let t = 0; t <= 4; t++) {
     const v = (max / 4) * t;
     svgEl('line', { x1: m.l, x2: W - m.r, y1: Y(v), y2: Y(v), stroke: t === 0 ? c.axis : c.grid, 'stroke-width': 1 }, svg);
-    svgEl('text', { x: m.l - 6, y: Y(v) + 4, 'text-anchor': 'end', 'font-size': 11, fill: c.muted }, svg).textContent = fcAxisLabel(v, pct, money);
+    svgEl('text', { x: m.l - 6, y: Y(v) + 4, 'text-anchor': 'end', 'font-size': 12, fill: c.muted }, svg).textContent = fcAxisLabel(v, pct, money);
   }
   const every = xTickEvery(n, iw);
-  keys.forEach((k, i) => { if (i % every === 0) svgEl('text', { x: X(i), y: H - 8, 'text-anchor': 'middle', 'font-size': 11, fill: c.muted }, svg).textContent = idxLabel(k); });
+  keys.forEach((k, i) => { if (i % every === 0) svgEl('text', { x: X(i), y: H - 8, 'text-anchor': 'middle', 'font-size': 12, fill: c.muted }, svg).textContent = idxLabel(k); });
   svgEl('line', { x1: fx, x2: fx, y1: m.t - 8, y2: m.t + ih, stroke: c.axis, 'stroke-width': 1 }, svg);
-  svgEl('text', { x: fx + 6, y: m.t - 6, 'font-size': 11, fill: c.muted }, svg).textContent = 'Projected';
+  svgEl('text', { x: fx + 6, y: m.t - 6, 'font-size': 12, fill: c.muted }, svg).textContent = 'Projected';
   for (const s of series) {
     const col = c[s.color];
     let top = '', bottom = '';
@@ -641,13 +696,13 @@ function projections() {
 
   const sum = (a, f) => a.reduce((s, x) => s + x[f], 0);
   const trendPct = vol.mean ? vol.slope / vol.mean : 0;
-  const tile = (label, v, d) => `<div class="ktile"><div class="eyebrow">${label}</div><div class="v">${v}</div>${d ? `<div class="d">${d}</div>` : ''}</div>`;
+  const tile = (label, v, d) => `<div class="ktile proj"><div class="eyebrow">Projected · ${label}</div><div class="v">${v}</div>${d ? `<div class="d">${d}</div>` : ''}</div>`;
   $('#fcTiles').innerHTML =
     tile(`HAWBs, next ${H} weeks`, fmtN(sum(vol.out, 'mid')), `likely ${fmtN(sum(vol.out, 'lo'))} – ${fmtN(sum(vol.out, 'hi'))}`) +
-    tile('Recent trend', (trendPct >= 0 ? '+' : '') + (trendPct * 100).toFixed(1) + '% a week', `${trendPct >= 0 ? 'more' : 'fewer'} HAWBs each week over the last ${sb.length} weeks`) +
-    tile('Projected gross OTP', fmtP(gross[0].mid), `likely ${fmtP(gross[0].lo)} – ${fmtP(gross[0].hi)} in a given week`) +
-    tile('Projected net OTP', fmtP(net[0].mid, 2), `likely ${fmtP(net[0].lo, 2)} – ${fmtP(net[0].hi, 2)} in a given week`) +
-    tile(`Revenue, next ${H} weeks`, fmt$c(sum(rev.out, 'mid')), `likely ${fmt$c(sum(rev.out, 'lo'))} – ${fmt$c(sum(rev.out, 'hi'))}`);
+    tile('recent trend', (trendPct >= 0 ? '+' : '') + (trendPct * 100).toFixed(1) + '% a week', `${trendPct >= 0 ? 'more' : 'fewer'} HAWBs each week over the last ${sb.length} weeks`) +
+    tile('gross OTP', fmtP(gross[0].mid), `likely ${fmtP(gross[0].lo)} – ${fmtP(gross[0].hi)} in a given week`) +
+    tile('net OTP', fmtP(net[0].mid, 2), `likely ${fmtP(net[0].lo, 2)} – ${fmtP(net[0].hi, 2)} in a given week`) +
+    tile(`revenue, next ${H} weeks`, fmt$c(sum(rev.out, 'mid')), `likely ${fmt$c(sum(rev.out, 'lo'))} – ${fmt$c(sum(rev.out, 'hi'))}`);
 
   // chart series: up to 26 actual weeks, then H projected weeks joined at the last actual week
   const build = (hist, val, proj) => {
@@ -665,11 +720,11 @@ function projections() {
   } });
   const rate = (f) => (p) => (p.v[0] ? 1 - p.v[f] / p.v[0] : null);
   const g = build(pod, rate(1), gross), nn = build(pod, rate(2), net);
-  fcChart($('#fcOtp'), g.keys, g.nActual, [{ color: 's1', ...g }, { color: 's2', ...nn }], { pct: true, tip: (i) => {
+  fcChart($('#fcOtp'), g.keys, g.nActual, [{ color: 's1', ...g }, { color: 's3', ...nn }], { pct: true, tip: (i) => {
     const isP = i >= g.nActual;
     return head(g.keys, i, isP) + (isP
-      ? row('Gross on-time', `${fmtP(g.mid[i])} (${fmtP(g.lo[i])} – ${fmtP(g.hi[i])})`, c.s1) + row('Net on-time', `${fmtP(nn.mid[i], 2)} (${fmtP(nn.lo[i], 1)} – ${fmtP(nn.hi[i], 1)})`, c.s2)
-      : row('Gross on-time', fmtP(g.actual[i]), c.s1) + row('Net on-time', fmtP(nn.actual[i], 2), c.s2));
+      ? row('Gross on-time', `${fmtP(g.mid[i])} (${fmtP(g.lo[i])} – ${fmtP(g.hi[i])})`, c.s1) + row('Net on-time', `${fmtP(nn.mid[i], 2)} (${fmtP(nn.lo[i], 2)} – ${fmtP(nn.hi[i], 2)})`, c.s3)
+      : row('Gross on-time', fmtP(g.actual[i]), c.s1) + row('Net on-time', fmtP(nn.actual[i], 2), c.s3));
   } });
   const r = build(pod, (p) => p.v[3], rev.out);
   fcChart($('#fcRev'), r.keys, r.nActual, [{ color: 's1', ...r }], { money: true, tip: (i) => {
@@ -680,13 +735,13 @@ function projections() {
   const lastShip = ship[ship.length - 1].k;
   const tw = thisWeek(), isNowIdx = (i) => i === mondayIdx(tw.year, tw.week);
   const wkName = (h) => `${idxLabel(lastShip + h + 1)}, ${idxDate(lastShip + h + 1).getUTCFullYear()}`;
-  $('#fcTable').innerHTML = `<table><thead><tr><th>Week of</th><th>HAWBs</th><th>range</th><th>Gross OTP</th><th>range</th><th>Net OTP</th><th>range</th><th>Revenue</th><th>range</th></tr></thead><tbody>` +
-    vol.out.map((p, h) => `<tr${isNowIdx(lastShip + h + 1) ? ' class="now"' : ''}><td>${wkName(h)}${isNowIdx(lastShip + h + 1) ? nowTag : ''}</td><td>${fmtN(p.mid)}</td><td class="rng">${fmtN(p.lo)} – ${fmtN(p.hi)}</td>` +
-      `<td>${fmtP(gross[h].mid)}</td><td class="rng">${fmtP(gross[h].lo)} – ${fmtP(gross[h].hi)}</td>` +
-      `<td>${fmtP(net[h].mid, 2)}</td><td class="rng">${fmtP(net[h].lo, 1)} – ${fmtP(net[h].hi, 1)}</td>` +
-      `<td>${fmt$(rev.out[h].mid)}</td><td class="rng">${fmt$(rev.out[h].lo)} – ${fmt$(rev.out[h].hi)}</td></tr>`).join('') +
-    `<tr class="total"><td>Total</td><td>${fmtN(sum(vol.out, 'mid'))}</td><td class="rng">${fmtN(sum(vol.out, 'lo'))} – ${fmtN(sum(vol.out, 'hi'))}</td><td></td><td></td><td></td><td></td>` +
-    `<td>${fmt$(sum(rev.out, 'mid'))}</td><td class="rng">${fmt$(sum(rev.out, 'lo'))} – ${fmt$(sum(rev.out, 'hi'))}</td></tr></tbody></table>`;
+  const fig = (v, lo, hi) => `<td>${v}<span class="rg">${lo} – ${hi}</span></td>`;
+  $('#fcTable').innerHTML = `<table><thead><tr><th>Week of</th><th>HAWBs shipped</th><th>Gross OTP</th><th>Net OTP</th><th>Revenue</th></tr></thead><tbody>` +
+    vol.out.map((p, h) => `<tr${isNowIdx(lastShip + h + 1) ? ' class="now"' : ''}><td>${wkName(h)}${isNowIdx(lastShip + h + 1) ? nowTag : ''}</td>` +
+      fig(fmtN(p.mid), fmtN(p.lo), fmtN(p.hi)) + fig(fmtP(gross[h].mid), fmtP(gross[h].lo), fmtP(gross[h].hi)) +
+      fig(fmtP(net[h].mid, 2), fmtP(net[h].lo, 2), fmtP(net[h].hi, 2)) + fig(fmt$(rev.out[h].mid), fmt$(rev.out[h].lo), fmt$(rev.out[h].hi)) + '</tr>').join('') +
+    `<tr class="total"><td>Total</td>${fig(fmtN(sum(vol.out, 'mid')), fmtN(sum(vol.out, 'lo')), fmtN(sum(vol.out, 'hi')))}<td></td><td></td>` +
+    `${fig(fmt$(sum(rev.out, 'mid')), fmt$(sum(rev.out, 'lo')), fmt$(sum(rev.out, 'hi')))}</tr></tbody></table>`;
 }
 
 // ---------- render ----------
@@ -704,7 +759,7 @@ function render() {
   if (S.tab === 'fc') projections();
   if (S.tab === 'about') about();
 }
-function update() { saveState(); aggregate(); render(); }
+function update() { saveState(); aggregate(); renderMini(); render(); }
 $('#otpSearch').addEventListener('input', render);
 $('#shipSearch').addEventListener('input', render);
 let rz, lastW = 0;
