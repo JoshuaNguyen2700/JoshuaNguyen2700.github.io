@@ -72,6 +72,11 @@
 .otp-linkbtn:hover{text-decoration:underline}
 .otp-btn{display:inline-block;font:inherit;font-size:13px;font-weight:500;color:var(--text);background:var(--o-raised);border:1px solid var(--o-axis);border-radius:var(--radius-pill);padding:4px 12px;cursor:pointer}
 .otp-btn:hover{border-color:var(--text)}
+.otp-btn-primary{background:var(--text);border-color:var(--text);color:var(--bg)}
+.otp-btn-primary:hover{opacity:.88}
+.otp-btn:disabled{opacity:.6;cursor:progress}
+.card-h .copybtn{margin-left:auto;font-weight:500}
+.card-h .sub + .copybtn{margin-left:0}
 .sub{color:var(--muted);font-size:13px}
 .num{font-variant-numeric:tabular-nums}
 :where(.otp) :focus-visible{outline:2px solid var(--accent);outline-offset:2px}

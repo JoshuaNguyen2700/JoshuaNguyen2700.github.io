@@ -529,8 +529,8 @@ function segControl(sel, key) {
 
 // Ship rows with the CSR volume split applied (only CSR views use this; totals are unchanged).
 // Returns the rows and the set of CSR ids whose volume changed.
-function csrShipRows() {
-  if (S.csrVol !== 'adj') return { rows: A.shipRows, touched: new Set() };
+function csrShipRows(mode = S.csrVol) {
+  if (mode !== 'adj') return { rows: A.shipRows, touched: new Set() };
   const rules = CSR_SPLITS.map((x) => ({ region: dims.region.indexOf(x.region), from: dims.csr.indexOf(x.from), to: dims.csr.indexOf(x.to), share: x.share }))
     .filter((x) => x.region >= 0 && x.from >= 0 && x.to >= 0);
   if (!rules.length) return { rows: A.shipRows, touched: new Set() };
@@ -798,6 +798,177 @@ function projections() {
     `<tr class="total"><td>Total</td>${fig(fmtN(sum(vol.out, 'mid')), fmtN(sum(vol.out, 'lo')), fmtN(sum(vol.out, 'hi')))}<td></td><td></td>` +
     `${fig(fmt$(sum(rev.out, 'mid')), fmt$(sum(rev.out, 'lo')), fmt$(sum(rev.out, 'hi')))}</tr></tbody></table>`;
 }
+
+// ---------- export to Excel and copy tables ----------
+// Export builds a workbook from the current filters, laid out like the OTP summary workbooks
+// (Ship Volume by Week, OTP BY WEEK with PODS / RAW% / NET%, monthly versions, CSR tables).
+// The spreadsheet library is shared on the bus and only loaded when someone exports.
+let xlsxLoading = null;
+function loadXlsx() {
+  if (window.XLSX) return Promise.resolve(window.XLSX);
+  if (!xlsxLoading) {
+    xlsxLoading = new Promise((ok, fail) => {
+      const s = document.createElement('script');
+      s.src = '/assets/vendor/xlsx.full.min.js';
+      s.onload = () => ok(window.XLSX);
+      s.onerror = () => { xlsxLoading = null; fail(new Error('The Excel library could not be loaded. Check your connection and try again.')); };
+      document.head.append(s);
+    });
+  }
+  return xlsxLoading;
+}
+const xN = (v, z = '#,##0') => (v ? { t: 'n', v, z } : '');              // blank for zero, like a pivot
+const xP = (v, z = '0.0%') => (v == null || !isFinite(v) ? '' : { t: 'n', v, z });
+const xWeek = (k, multi) => 'WK' + (k % 100) + (multi ? " '" + String(Math.floor(k / 100)).slice(2) : '');
+const x0 = (v, z = '#,##0') => ({ t: 'n', v: v || 0, z });              // zero shown as 0 in summary tables
+
+function groupFacts(facts, rowKey, colKey, otp) {
+  const cells = new Map(), rows = new Map(), cols = new Map(), all = { h: 0, gl: 0, nl: 0 };
+  const bump = (m, k) => { let o = m.get(k); if (!o) m.set(k, (o = { h: 0, gl: 0, nl: 0 })); return o; };
+  for (const r of facts) {
+    const rk = rowKey(r), ck = colKey(r);
+    for (const o of [bump(cells, rk + '|' + ck), bump(rows, rk), bump(cols, ck), all]) { o.h += r[7]; if (otp) { o.gl += r[8]; o.nl += r[9]; } }
+  }
+  return { cells, rows, cols, all, colKeys: [...cols.keys()].sort((a, b) => a - b) };
+}
+function regionsOf(facts, col) {
+  const m = new Map();
+  for (const r of facts) { const k = r[col]; m.set(k, m.has(k) && m.get(k) !== r[0] ? -1 : r[0]); }
+  return (k) => (m.get(k) >= 0 ? dims.region[m.get(k)] : 'Multiple');
+}
+// Volume table: one row per customer/CSR, one column per week or month.
+function volumeBlock(facts, col, period, label) {
+  const byMonth = period === 'month', g = groupFacts(facts, (r) => r[col], (r) => (byMonth ? r.ym : r.wk), false);
+  const multi = multiYear(g.colKeys), head = (k) => (byMonth ? ymLabel(k) : xWeek(k, multi));
+  const names = dims[col === 1 ? 'cust' : 'csr'], reg = col === 1 ? regionsOf(facts, 1) : null;
+  const ids = [...g.rows.keys()].sort(byName(names));
+  const aoa = [[label, ...g.colKeys.map(head), 'Total', ...(reg ? ['Region'] : [])]];
+  aoa.push(['Grand Total', ...g.colKeys.map((k) => xN(g.cols.get(k).h)), xN(g.all.h), ...(reg ? [''] : [])]);
+  for (const id of ids) aoa.push([names[id], ...g.colKeys.map((k) => xN(g.cells.get(id + '|' + k)?.h)), xN(g.rows.get(id).h), ...(reg ? [reg(id)] : [])]);
+  return { aoa, merges: [] };
+}
+// OTP table: per week or month, three columns PODS / RAW% (gross) / NET%.
+function otpBlock(facts, col, period, label) {
+  const byMonth = period === 'month', g = groupFacts(facts, (r) => r[col], (r) => (byMonth ? r.ym : r.wk), true);
+  const multi = multiYear(g.colKeys), head = (k) => (byMonth ? ymLabel(k) : xWeek(k, multi));
+  const names = dims[col === 1 ? 'cust' : 'csr'], ids = [...g.rows.keys()].sort(byName(names));
+  const trip = (o) => (o && o.h ? [xN(o.h), xP(1 - o.gl / o.h), xP(1 - o.nl / o.h, '0.00%')] : ['', '', '']);
+  const top = [byMonth ? 'MONTH' : 'WEEK'], sub = [label], merges = [];
+  [...g.colKeys, 'total'].forEach((k, i) => {
+    top.push(k === 'total' ? 'TOTAL' : head(k), '', ''); sub.push('PODS', 'RAW%', 'NET%');
+    merges.push({ s: { r: 0, c: 1 + i * 3 }, e: { r: 0, c: 3 + i * 3 } });
+  });
+  const aoa = [top, sub, ['Grand Total', ...g.colKeys.flatMap((k) => trip(g.cols.get(k))), ...trip(g.all)]];
+  for (const id of ids) aoa.push([names[id], ...g.colKeys.flatMap((k) => trip(g.cells.get(id + '|' + k))), ...trip(g.rows.get(id))]);
+  return { aoa, merges };
+}
+// Stack titled blocks down one sheet with blank rows between, like the summary's CSR sheets.
+function stackBlocks(blocks) {
+  const aoa = [], merges = [];
+  for (const [title, b] of blocks) {
+    if (aoa.length) aoa.push([], []);
+    aoa.push([title]);
+    const off = aoa.length;
+    for (const row of b.aoa) aoa.push(row);
+    for (const m of b.merges) merges.push({ s: { r: m.s.r + off, c: m.s.c }, e: { r: m.e.r + off, c: m.e.c } });
+  }
+  return { aoa, merges };
+}
+function sheetFrom(XLSX, block, firstCol = 34) {
+  const ws = XLSX.utils.aoa_to_sheet(block.aoa);
+  const width = Math.max(1, ...block.aoa.map((r) => r.length));
+  ws['!cols'] = Array.from({ length: width }, (_, i) => ({ wch: i === 0 ? firstCol : 11 }));
+  if (block.merges.length) ws['!merges'] = block.merges;
+  return ws;
+}
+function filterLines() {
+  const lines = [
+    ['OTP Dashboard export'],
+    ['Exported', new Date().toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })],
+    ['Data built', fmtBuilt(DATA.generated)],
+    ['Source files', (DATA.sources || []).join(', ')],
+    [],
+    ['Regions', S.regions.length === NR ? 'All regions' : S.regions.map((i) => dims.region[i]).join(', ')],
+    ['Account', S.account >= 0 ? dims.account[S.account] : 'All accounts'],
+    ['CSR', S.csr >= 0 ? dims.csr[S.csr] : 'All CSRs'],
+    ['Customer', S.cust >= 0 ? dims.cust[S.cust] : 'All customers'],
+    ['Months', `${ymLabel(S.from)} – ${ymLabel(S.to)} (ship month for volume, POD month for OTP)`],
+    [],
+    ['RAW%', 'Gross on-time: delivered on or before the adjusted due date'],
+    ['NET%', 'Net on-time: late shipments count against it only when the delay code is Controllable'],
+    ['Weeks', `WEEKNUM(date, 2), weeks start Monday. ${ISO_WEEK_REGIONS.join(' and ')} use ISO weeks (Dec 29 – Jan 4 is WK1).`],
+    ['Adjusted CSR volume', 'Jesus Quiroga keeps 2/3 of his COSTCO+ shipments; 1/3 is credited to Mindy Wilson.'],
+  ];
+  return { aoa: lines, merges: [] };
+}
+function exportName() {
+  const reg = S.regions.length === NR ? 'All regions' : S.regions.map((i) => dims.region[i]).join(' ');
+  const who = [S.account >= 0 ? dims.account[S.account] : '', S.csr >= 0 ? dims.csr[S.csr] : '', S.cust >= 0 ? dims.cust[S.cust] : ''].filter(Boolean).join(' ');
+  const name = `OTP export - ${reg}${who ? ' - ' + who : ''} - ${ymLabel(S.from)} to ${ymLabel(S.to)}`;
+  return name.replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ').slice(0, 150) + '.xlsx';
+}
+async function exportExcel() {
+  const btn = $('#exportBtn'), label = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Preparing…';
+  try {
+    const XLSX = await loadXlsx(), wb = XLSX.utils.book_new();
+    const add = (name, block, w) => XLSX.utils.book_append_sheet(wb, sheetFrom(XLSX, block, w), name);
+    const raw = csrShipRows('raw').rows, adj = csrShipRows('adj').rows;
+    add('Filters', filterLines(), 22);
+    add('Ship Volume by Week', volumeBlock(A.shipRows, 1, 'week', 'Customer'));
+    add('OTP by Week', otpBlock(A.podRows, 1, 'week', 'CUSTOMER'));
+    add('Ship Volume by Month', volumeBlock(A.shipRows, 1, 'month', 'Customer'));
+    add('OTP by Month', otpBlock(A.podRows, 1, 'month', 'CUSTOMER'));
+    add('Ship Vol CSR', stackBlocks([
+      ['BY MONTH', volumeBlock(raw, 3, 'month', 'CSR')], ['BY MONTH ADJUSTED', volumeBlock(adj, 3, 'month', 'CSR')],
+      ['BY WEEK', volumeBlock(raw, 3, 'week', 'CSR')], ['BY WEEK ADJUSTED', volumeBlock(adj, 3, 'week', 'CSR')]]), 26);
+    add('OTP by CSR', stackBlocks([['BY MONTH', otpBlock(A.podRows, 3, 'month', 'CSR')], ['BY WEEK', otpBlock(A.podRows, 3, 'week', 'CSR')]]), 26);
+    // dashboard tables
+    const wkKeys = sortedKeys(A.podW), multi = multiYear(wkKeys);
+    const line = (label, w) => [label, x0(w.h), x0(w.rev, '$#,##0'), x0(w.gl), x0(w.nl), xP(1 - w.gl / w.h), xP(1 - w.nl / w.h, '0.00%')];
+    add('Weekly Summary', { aoa: [['POD week', 'HAWBs', 'Total revenue', 'Gross late', 'Net late', 'On-time gross %', 'On-time net %'],
+      ...wkKeys.map((k) => line(xWeek(k, multi), A.podW.get(k))), ...(A.tot.h ? [line('Grand total', A.tot)] : [])], merges: [] }, 14);
+    const regIds = [...new Set([...A.regP.keys(), ...A.regS.keys()])].sort((a, b) => a - b), none = { h: 0, gl: 0, nl: 0, rev: 0 };
+    const rline = (label, s, p) => [label, x0(s), x0(p.h), x0(p.rev, '$#,##0'), p.h ? xP(1 - p.gl / p.h) : '', p.h ? xP(1 - p.nl / p.h, '0.00%') : ''];
+    add('By Region', { aoa: [['Region', 'Shipped', 'Delivered', 'Revenue', 'Gross OTP', 'Net OTP'],
+      ...regIds.map((i) => rline(dims.region[i], A.regS.get(i) || 0, A.regP.get(i) || none)), rline('Total', A.tot.shipped, A.tot)], merges: [] }, 16);
+    const late = [...A.delay.entries()].map(([k, v]) => [dims.delay[k], v[0], v[1]]).sort((a, b) => b[1] + b[2] - a[1] - a[2]);
+    const lateTot = late.reduce((s, x) => s + x[1] + x[2], 0);
+    add('Delay Codes', { aoa: [['Delay code (late shipments)', 'Late HAWBs', 'Controllable', 'Uncontrollable', 'Share of late'],
+      ...late.map(([n, c, u]) => [n, x0(c + u), x0(c), x0(u), xP(lateTot ? (c + u) / lateTot : null)])], merges: [] }, 34);
+    XLSX.writeFile(wb, exportName());
+    btn.textContent = 'Downloaded';
+  } catch (err) {
+    btn.textContent = 'Export failed';
+    $('#notice').hidden = false; $('#notice').textContent = 'Export to Excel failed: ' + (err && err.message ? err.message : err);
+  } finally {
+    setTimeout(() => { btn.textContent = label; btn.disabled = false; }, 1800);
+  }
+}
+$('#exportBtn').addEventListener('click', () => { if (A) exportExcel(); });
+
+// Copy any table as tab-separated text, which pastes straight into Excel cells.
+function tableText(table) {
+  return [...table.rows].map((tr) => [...tr.cells].map((td) => {
+    const c = td.cloneNode(true);
+    c.querySelectorAll('.nowtag, .parttag, .rtag').forEach((e) => e.remove());
+    c.querySelectorAll('.rg').forEach((e) => e.replaceWith(' (' + e.textContent.trim() + ')'));
+    return c.textContent.replace(/\s+/g, ' ').trim();
+  }).join('\t')).join('\n');
+}
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest('.copybtn'); if (!b) return;
+  const table = document.querySelector(b.dataset.copy + ' table');
+  if (!table) return;
+  const text = tableText(table), label = b.dataset.label || (b.dataset.label = b.textContent);
+  try { await navigator.clipboard.writeText(text); b.textContent = 'Copied'; }
+  catch (err) {
+    const ta = document.createElement('textarea'); ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.append(ta); ta.select();
+    b.textContent = document.execCommand('copy') ? 'Copied' : 'Copy failed'; ta.remove();
+  }
+  setTimeout(() => { b.textContent = label; }, 1500);
+});
 
 // ---------- render ----------
 function renderThisWeek() {

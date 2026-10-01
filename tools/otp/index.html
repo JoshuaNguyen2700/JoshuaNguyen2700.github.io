@@ -48,6 +48,7 @@
       <div class="otp-meta">
         <div id="meta"></div>
         <div class="otp-meta-actions">
+          <button class="otp-btn otp-btn-primary" id="exportBtn" type="button" title="Download the filtered data as an Excel workbook">Export to Excel</button>
           <label class="otp-btn" for="xlsxInput">Load new Excel files</label>
           <button class="otp-linkbtn" id="saveBtn" type="button">Save data file</button>
           <button class="otp-linkbtn" id="forgetBtn" type="button">Close data</button>
@@ -107,19 +108,19 @@
           <div class="chart" id="cDelay"></div>
         </div>
         <div class="card">
-          <div class="card-h"><h2>By region</h2><span class="sub">in the selected period</span></div>
+          <div class="card-h"><h2>By region</h2><span class="sub">in the selected period</span><button class="otp-linkbtn copybtn" type="button" data-copy="#tRegion" title="Copy this table, then paste into Excel">Copy</button></div>
           <div class="tscroll" id="tRegion"></div>
         </div>
       </div>
       <div class="card">
-        <div class="card-h"><h2>Weekly summary</h2><span class="sub">by POD week, newest first</span></div>
+        <div class="card-h"><h2>Weekly summary</h2><span class="sub">by POD week, newest first</span><button class="otp-linkbtn copybtn" type="button" data-copy="#tWeek" title="Copy this table, then paste into Excel">Copy</button></div>
         <div class="tscroll" id="tWeek"></div>
       </div>
     </section>
 
     <section class="panel" id="p-otp" role="tabpanel" aria-labelledby="tab-otp" hidden>
       <div class="card">
-        <div class="card-h"><h2>OTP by customer and POD week</h2><span class="sub">opens at the newest week; scroll left for earlier weeks</span></div>
+        <div class="card-h"><h2>OTP by customer and POD week</h2><span class="sub">opens at the newest week; scroll left for earlier weeks</span><button class="otp-linkbtn copybtn" type="button" data-copy="#mOtp" title="Copy this table, then paste into Excel">Copy</button></div>
         <div class="tools">
           <div class="seg" id="otpMetric"></div>
           <input type="search" id="otpSearch" placeholder="Search customer" aria-label="Search customer">
@@ -137,7 +138,7 @@
         <div class="chart" id="cShip2"></div>
       </div>
       <div class="card">
-        <div class="card-h"><h2>HAWB count by customer and ship week</h2><span class="sub">opens at the newest week</span></div>
+        <div class="card-h"><h2>HAWB count by customer and ship week</h2><span class="sub">opens at the newest week</span><button class="otp-linkbtn copybtn" type="button" data-copy="#mShip" title="Copy this table, then paste into Excel">Copy</button></div>
         <div class="tools"><input type="search" id="shipSearch" placeholder="Search customer" aria-label="Search customer"></div>
         <div class="tscroll" id="mShip"></div>
         <div class="tools" id="mShipMore"></div>
@@ -146,18 +147,18 @@
 
     <section class="panel" id="p-csr" role="tabpanel" aria-labelledby="tab-csr" hidden>
       <div class="card">
-        <div class="card-h"><h2>CSR summary</h2><span class="sub">people and teams, A to Z</span></div>
+        <div class="card-h"><h2>CSR summary</h2><span class="sub">people and teams, A to Z</span><button class="otp-linkbtn copybtn" type="button" data-copy="#tCsr" title="Copy this table, then paste into Excel">Copy</button></div>
         <div class="tools"><span class="note">Shipment volume</span><div class="seg" id="csrVol"></div></div>
         <p class="note" id="csrVolNote"></p>
         <div class="tscroll" id="tCsr"></div>
       </div>
       <div class="card">
-        <div class="card-h"><h2 id="csrShipTitle">HAWB count by CSR and ship week</h2><span class="sub" id="csrShipSub">opens at the newest week</span></div>
+        <div class="card-h"><h2 id="csrShipTitle">HAWB count by CSR and ship week</h2><span class="sub" id="csrShipSub">opens at the newest week</span><button class="otp-linkbtn copybtn" type="button" data-copy="#mCsrShip" title="Copy this table, then paste into Excel">Copy</button></div>
         <div class="tools"><div class="seg" id="csrPer"></div></div>
         <div class="tscroll" id="mCsrShip"></div>
       </div>
       <div class="card">
-        <div class="card-h"><h2>OTP by CSR and POD week</h2><span class="sub">opens at the newest week</span></div>
+        <div class="card-h"><h2>OTP by CSR and POD week</h2><span class="sub">opens at the newest week</span><button class="otp-linkbtn copybtn" type="button" data-copy="#mCsrOtp" title="Copy this table, then paste into Excel">Copy</button></div>
         <div class="tools"><div class="seg" id="csrMetric"></div></div>
         <div class="tscroll" id="mCsrOtp"></div>
       </div>
@@ -191,7 +192,7 @@
         <div class="chart" id="fcRev"></div>
       </div>
       <div class="card">
-        <div class="card-h"><h2>Projected weeks</h2><span class="sub">likely range under each figure</span></div>
+        <div class="card-h"><h2>Projected weeks</h2><span class="sub">likely range under each figure</span><button class="otp-linkbtn copybtn" type="button" data-copy="#fcTable" title="Copy this table, then paste into Excel">Copy</button></div>
         <div class="tscroll" id="fcTable"></div>
       </div>
     </section>
