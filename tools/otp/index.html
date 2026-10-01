@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OTP Dashboard · Joshua Nguyen</title>
+<meta name="description" content="Weekly on-time delivery by region, customer and CSR. Your data file opens in the browser and is never uploaded.">
+<!-- Shared bus: absolute paths. This tool's own files: relative paths. -->
+<link rel="stylesheet" href="/assets/bus.css">
+<script src="/assets/core/theme.js"></script>
+<link rel="stylesheet" href="tool.css">
+</head>
+<body>
+<header data-shell="nav"></header>
+
+<main>
+  <!-- Shown until a data file is opened. No shipment data is ever stored in this website. -->
+  <section class="hero otp-start" id="start">
+    <div class="eyebrow">Available now</div>
+    <h1>OTP Dashboard</h1>
+    <p>Weekly on-time delivery by region, customer and CSR. Open the data file made by <code>build_otp_dashboard.py</code> to begin.</p>
+    <div class="actions">
+      <label class="btn" for="fileInput">Open data file</label>
+      <a class="link" href="/">Back to Home</a>
+    </div>
+    <div class="otp-drop" id="drop">or drop <b>otp_dashboard_data.json</b> here</div>
+    <p class="otp-privacy">The file is read by your browser on this computer. Nothing is uploaded or published.</p>
+    <p class="otp-error" id="startError" role="alert" hidden></p>
+  </section>
+  <input type="file" id="fileInput" accept=".json,application/json" hidden>
+
+  <div class="otp" id="app" hidden>
+    <header class="otp-head">
+      <div>
+        <div class="eyebrow">On-time performance · all regions</div>
+        <h1>OTP Dashboard</h1>
+      </div>
+      <div class="otp-meta">
+        <div id="meta"></div>
+        <div class="otp-meta-actions">
+          <label class="otp-linkbtn" for="fileInput">Open another file</label>
+          <label class="otp-check"><input type="checkbox" id="remember"> Remember on this computer</label>
+          <button class="otp-linkbtn" id="forgetBtn" type="button">Close data</button>
+        </div>
+      </div>
+    </header>
+
+    <section class="otp-filters" aria-label="Filters">
+      <div class="frow">
+        <span class="eyebrow">Region</span>
+        <div class="chips" id="regionChips"></div>
+        <button class="otp-linkbtn" id="resetBtn" type="button">Reset filters</button>
+      </div>
+      <div class="frow">
+        <div class="field"><label for="fAccount">Account</label><select id="fAccount"></select></div>
+        <div class="field"><label for="fCsr">CSR</label><select id="fCsr"></select></div>
+        <div class="field"><label for="fCust">Customer</label><select id="fCust"></select></div>
+        <div class="field"><label for="fFrom">From month</label><select id="fFrom"></select></div>
+        <div class="field"><label for="fTo">To month</label><select id="fTo"></select></div>
+      </div>
+    </section>
+
+    <nav class="otp-tabs" role="tablist" aria-label="Reports">
+      <button class="tab" role="tab" id="tab-dash" data-tab="dash">Dashboard</button>
+      <button class="tab" role="tab" id="tab-otp" data-tab="otp">OTP by customer</button>
+      <button class="tab" role="tab" id="tab-ship" data-tab="ship">Shipments by week</button>
+      <button class="tab" role="tab" id="tab-csr" data-tab="csr">CSR</button>
+      <button class="tab" role="tab" id="tab-about" data-tab="about">How it's calculated</button>
+    </nav>
+
+    <section class="panel" id="p-dash" role="tabpanel" aria-labelledby="tab-dash">
+      <div class="tiles-k" id="tiles"></div>
+      <div class="grid2">
+        <div class="card">
+          <div class="card-h"><h2>Weekly OTP</h2><span class="sub">by POD week</span></div>
+          <div class="legend"><span><i style="background:var(--s1)"></i>Gross on-time %</span><span><i style="background:var(--s2)"></i>Net on-time %</span></div>
+          <div class="chart" id="cOtp"></div>
+        </div>
+        <div class="card">
+          <div class="card-h"><h2>HAWBs shipped per week</h2><span class="sub">by ship week</span></div>
+          <div class="chart" id="cShip"></div>
+        </div>
+      </div>
+      <div class="grid2">
+        <div class="card">
+          <div class="card-h"><h2>Delay codes on late shipments</h2><span class="sub">share of gross late</span></div>
+          <div class="legend"><span><i class="sq" style="background:var(--s2)"></i>Controllable (counts as net late)</span><span><i class="sq" style="background:var(--s1)"></i>Uncontrollable / no code</span></div>
+          <div class="chart" id="cDelay"></div>
+        </div>
+        <div class="card">
+          <div class="card-h"><h2>By region</h2><span class="sub">in the selected period</span></div>
+          <div class="tscroll" id="tRegion"></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-h"><h2>Weekly summary</h2><span class="sub">POD week · same layout as the DASHBOARD sheet</span></div>
+        <div class="tscroll" id="tWeek"></div>
+      </div>
+    </section>
+
+    <section class="panel" id="p-otp" role="tabpanel" aria-labelledby="tab-otp" hidden>
+      <div class="card">
+        <div class="card-h"><h2>OTP by customer and POD week</h2><span class="sub">OTP CHART PIVOT</span></div>
+        <div class="tools">
+          <div class="seg" id="otpMetric"></div>
+          <input type="search" id="otpSearch" placeholder="Search customer" aria-label="Search customer">
+          <span class="note">Shading = share late. Hover a cell for HAWBs, gross and net.</span>
+        </div>
+        <div class="tscroll" id="mOtp"></div>
+        <div class="tools" id="mOtpMore"></div>
+      </div>
+    </section>
+
+    <section class="panel" id="p-ship" role="tabpanel" aria-labelledby="tab-ship" hidden>
+      <div class="card">
+        <div class="card-h"><h2>HAWBs shipped per week</h2><span class="sub">SHIP NUMBER pivot</span></div>
+        <div class="chart" id="cShip2"></div>
+      </div>
+      <div class="card">
+        <div class="card-h"><h2>HAWB count by customer and ship week</h2></div>
+        <div class="tools"><input type="search" id="shipSearch" placeholder="Search customer" aria-label="Search customer"></div>
+        <div class="tscroll" id="mShip"></div>
+        <div class="tools" id="mShipMore"></div>
+      </div>
+    </section>
+
+    <section class="panel" id="p-csr" role="tabpanel" aria-labelledby="tab-csr" hidden>
+      <div class="card">
+        <div class="card-h"><h2>CSR summary</h2><span class="sub">tip: click region chips to leave a region out</span></div>
+        <div class="tscroll" id="tCsr"></div>
+      </div>
+      <div class="card">
+        <div class="card-h"><h2>HAWB count by CSR and ship week</h2><span class="sub">CSR pivot, top table</span></div>
+        <div class="tscroll" id="mCsrShip"></div>
+      </div>
+      <div class="card">
+        <div class="card-h"><h2>OTP by CSR and POD week</h2><span class="sub">CSR pivot, bottom table</span></div>
+        <div class="tools"><div class="seg" id="csrMetric"></div></div>
+        <div class="tscroll" id="mCsrOtp"></div>
+      </div>
+    </section>
+
+    <section class="panel" id="p-about" role="tabpanel" aria-labelledby="tab-about" hidden>
+      <div class="card about" id="about"></div>
+    </section>
+  </div>
+</main>
+<div id="tip" hidden></div>
+
+<footer data-shell="footer"></footer>
+<script type="module" src="/assets/core/shell.js"></script>
+<script type="module" src="tool.js"></script>
+</body>
+</html>

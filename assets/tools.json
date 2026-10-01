@@ -9,6 +9,13 @@
       "standalone": true
     },
     {
+      "id": "otp",
+      "name": "OTP Dashboard",
+      "blurb": "On-time delivery",
+      "status": "live",
+      "icon": "icon.svg"
+    },
+    {
       "id": "tool-2",
       "name": "Tool 2",
       "blurb": "A new tool is on the way.",
