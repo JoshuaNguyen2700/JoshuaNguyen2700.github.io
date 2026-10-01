@@ -76,6 +76,7 @@
       <button class="tab" role="tab" id="tab-otp" data-tab="otp">OTP by customer</button>
       <button class="tab" role="tab" id="tab-ship" data-tab="ship">Shipments by week</button>
       <button class="tab" role="tab" id="tab-csr" data-tab="csr">CSR</button>
+      <button class="tab" role="tab" id="tab-fc" data-tab="fc">Projections</button>
       <button class="tab" role="tab" id="tab-about" data-tab="about">How it's calculated</button>
     </nav>
 
@@ -148,6 +149,39 @@
         <div class="card-h"><h2>OTP by CSR and POD week</h2><span class="sub">CSR pivot, bottom table</span></div>
         <div class="tools"><div class="seg" id="csrMetric"></div></div>
         <div class="tscroll" id="mCsrOtp"></div>
+      </div>
+    </section>
+
+    <section class="panel" id="p-fc" role="tabpanel" aria-labelledby="tab-fc" hidden>
+      <div class="card">
+        <div class="card-h"><h2>Projections</h2><span class="sub">uses the region, account, CSR and customer filters; always projects from the latest weeks</span></div>
+        <div class="tools">
+          <span class="note">Project next</span><div class="seg" id="fcHorizon"></div>
+          <span class="note">Based on the last</span><div class="seg" id="fcBasis"></div>
+        </div>
+        <p class="note" id="fcNote"></p>
+      </div>
+      <div class="tiles-k" id="fcTiles"></div>
+      <div class="grid2">
+        <div class="card">
+          <div class="card-h"><h2>HAWBs shipped per week</h2><span class="sub">actual and projected, by ship week</span></div>
+          <div class="legend"><span><i style="background:var(--s1)"></i>Actual</span><span><i class="dash" style="--c:var(--s1)"></i>Projected</span><span><i class="sq band" style="--c:var(--s1)"></i>Likely range</span></div>
+          <div class="chart" id="fcVol"></div>
+        </div>
+        <div class="card">
+          <div class="card-h"><h2>On-time %</h2><span class="sub">actual and projected, by POD week</span></div>
+          <div class="legend"><span><i style="background:var(--s1)"></i>Gross on-time %</span><span><i style="background:var(--s2)"></i>Net on-time %</span><span><i class="dash" style="--c:var(--o-axis)"></i>Projected</span></div>
+          <div class="chart" id="fcOtp"></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-h"><h2>Revenue per week</h2><span class="sub">delivered revenue, actual and projected</span></div>
+        <div class="legend"><span><i style="background:var(--s1)"></i>Actual</span><span><i class="dash" style="--c:var(--s1)"></i>Projected</span><span><i class="sq band" style="--c:var(--s1)"></i>Likely range</span></div>
+        <div class="chart" id="fcRev"></div>
+      </div>
+      <div class="card">
+        <div class="card-h"><h2>Projected weeks</h2><span class="sub">each figure with its likely range</span></div>
+        <div class="tscroll" id="fcTable"></div>
       </div>
     </section>
 

@@ -25,7 +25,7 @@ let DATA = null, dims = null, NR = 0, months = [], S = null, A = null, RS = new 
 const expanded = {};
 
 const defaults = () => ({ regions: Array.from({ length: NR }, (_, i) => i), account: -1, csr: -1, cust: -1,
-  from: months[0], to: months[months.length - 1], tab: 'dash', otpMetric: 'gross', csrMetric: 'gross' });
+  from: months[0], to: months[months.length - 1], tab: 'dash', otpMetric: 'gross', csrMetric: 'gross', fcH: 8, fcBasis: 12 });
 const saveState = () => { try { localStorage.setItem(STATE_KEY, JSON.stringify(S)); } catch (e) {} };
 
 function validate(d) {
@@ -184,7 +184,7 @@ $('#resetBtn').addEventListener('click', () => { const t = S.tab; S = defaults()
 
 // ---------- tabs ----------
 function setTab(t) {
-  S.tab = ['dash', 'otp', 'ship', 'csr', 'about'].includes(t) ? t : 'dash';
+  S.tab = ['dash', 'otp', 'ship', 'csr', 'fc', 'about'].includes(t) ? t : 'dash';
   document.querySelectorAll('.tab').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === S.tab)));
   document.querySelectorAll('.panel').forEach((p) => (p.hidden = p.id !== 'p-' + S.tab));
   saveState(); render();
@@ -481,8 +481,199 @@ function about() {
       <li><b>CSR and Account</b> come from the value on each row, which keeps CSR history. Rows without a value use the CSR tab lookup.</li>
       <li>Delivery views (OTP, delay codes, revenue) filter by POD month; shipment counts filter by ship month, matching the Excel pivots.</li>
     </ul>
+    <h2>How projections work</h2>
+    <ul>
+      <li><b>HAWBs and revenue</b> follow a straight-line trend through the basis weeks (the last 8, 12 or 26 full weeks). The trend eases off further out, so a short run of growth or decline is not carried on forever.</li>
+      <li><b>On-time %</b> is the volume-weighted average of the basis weeks.</li>
+      <li>The <b>likely range</b> comes from how far actual weeks strayed from that pattern; about 8 in 10 weeks should land inside it. It widens the further out you look.</li>
+      <li>The newest week is left out when it has under 60% of the usual volume, since that means the export was pulled mid-week.</li>
+      <li>There is less than a year of history, so seasonal peaks and holiday weeks are not built in. Treat projections as a guide for the next few weeks, not a budget.</li>
+    </ul>
     ${checks ? `<h2>Source check</h2><ul>${checks}</ul>` : ''}
     <p class="note">Data built ${esc(DATA.generated || '?')} from ${(DATA.sources || []).map(esc).join(', ')}.</p>`;
+}
+
+// ---------- projections ----------
+// Weekly series ignore the month range (projections always start from the latest data) but use the
+// other filters. Weeks are keyed by their Monday, so the W53 and W1 halves of the New Year week merge.
+const DAY = 86400000;
+const FC_Z = 1.28;   // likely range covers about 8 in 10 weeks
+const FC_DAMP = 0.8; // the trend eases off further out instead of running away
+const mondayIdx = (y, w) => { const j = Date.UTC(y, 0, 1); return Math.round(((j - ((new Date(j).getUTCDay() + 6) % 7) * DAY + 7 * (w - 1) * DAY) / DAY - 4) / 7); };
+const idxDate = (i) => new Date((i * 7 + 4) * DAY);
+const idxLabel = (i) => { const d = idxDate(i); return MON[d.getUTCMonth()] + ' ' + d.getUTCDate(); };
+const passNoMonth = (r, valid) => valid.has(r[4] * 100 + r[6]) && RS.has(r[0]) && (S.account < 0 || r[2] === S.account) && (S.csr < 0 || r[3] === S.csr) && (S.cust < 0 || r[1] === S.cust);
+
+// Sums the given fact columns per Monday-week, filling missing weeks with zeros.
+function weekly(table, cols) {
+  const valid = new Set(months), m = new Map();
+  for (const r of table) {
+    if (!passNoMonth(r, valid)) continue;
+    const k = mondayIdx(r[4], r[5]);
+    let a = m.get(k); if (!a) m.set(k, (a = cols.map(() => 0)));
+    cols.forEach((c, j) => (a[j] += r[c]));
+  }
+  if (!m.size) return [];
+  const ks = [...m.keys()], lo = Math.min(...ks), hi = Math.max(...ks), out = [];
+  for (let k = lo; k <= hi; k++) out.push({ k, v: m.get(k) || cols.map(() => 0) });
+  return out;
+}
+// Drops the newest week when it is far below the weeks before it (an export pulled mid-week).
+function trimPartial(series) {
+  if (series.length < 5) return { series, dropped: null };
+  const last = series[series.length - 1], prev = series.slice(-5, -1).map((p) => p.v[0]).sort((a, b) => a - b);
+  const med = (prev[1] + prev[2]) / 2;
+  return last.v[0] < 0.6 * med ? { series: series.slice(0, -1), dropped: last } : { series, dropped: null };
+}
+// Straight-line fit over the basis weeks, projected with a trend that eases off.
+function trendProject(ys, H) {
+  const n = ys.length, xm = (n - 1) / 2, ym = ys.reduce((s, y) => s + y, 0) / n;
+  let sxy = 0, sxx = 0;
+  ys.forEach((y, x) => { sxy += (x - xm) * (y - ym); sxx += (x - xm) ** 2; });
+  const b = sxx ? sxy / sxx : 0, level = ym + b * (n - 1 - xm);
+  const sse = ys.reduce((s, y, x) => s + (y - (ym + b * (x - xm))) ** 2, 0), sd = Math.sqrt(sse / Math.max(1, n - 2));
+  const out = [];
+  for (let h = 1; h <= H; h++) {
+    const mid = Math.max(0, level + b * FC_DAMP * (1 - FC_DAMP ** h) / (1 - FC_DAMP)), w = FC_Z * sd * Math.sqrt(1 + h / n);
+    out.push({ mid, lo: Math.max(0, mid - w), hi: mid + w });
+  }
+  return { out, slope: b, mean: ym };
+}
+// On-time %: volume-weighted average of the basis weeks, with a range from the week-to-week swing.
+function rateProject(ok, tot, H) {
+  const T = tot.reduce((s, v) => s + v, 0);
+  if (!T) return null;
+  const p = ok.reduce((s, v) => s + v, 0) / T;
+  const rates = tot.map((t, i) => (t ? ok[i] / t : null)).filter((v) => v != null);
+  const sd = Math.sqrt(rates.reduce((s, r) => s + (r - p) ** 2, 0) / Math.max(1, rates.length - 1));
+  return Array.from({ length: H }, (_, h) => {
+    const w = FC_Z * sd * Math.sqrt(1 + (h + 1) / rates.length);
+    return { mid: p, lo: Math.max(0, p - w), hi: Math.min(1, p + w) };
+  });
+}
+
+function fcAxisLabel(v, pct, money) {
+  if (pct) return Math.round(v * 100) + '%';
+  const pre = money ? '$' : '';
+  if (v >= 1e6) return pre + (v / 1e6).toFixed(1) + 'M';
+  if (v >= 1000) return pre + (v / 1000).toFixed(v % 1000 ? 1 : 0) + 'K';
+  return pre + fmtN(v);
+}
+
+// Actual line, then a dashed projection with its likely-range band, in a shaded "Projected" zone.
+function fcChart(el, keys, nActual, series, { pct = false, money = false, tip }) {
+  el.innerHTML = '';
+  const c = T(), W = el.clientWidth || 600, H = 260, m = { l: pct ? 40 : 54, r: 14, t: 20, b: 26 };
+  const iw = W - m.l - m.r, ih = H - m.t - m.b, n = keys.length, bw = iw / n;
+  let max = 1;
+  if (!pct) { max = 0; for (const s of series) for (let i = 0; i < n; i++) max = Math.max(max, s.actual[i] ?? 0, s.hi[i] ?? 0); max = niceMax(max); }
+  const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, height: H, role: 'img', 'aria-label': 'Actual and projected weekly values' }, el);
+  const X = (i) => m.l + (i + 0.5) * bw, Y = (v) => m.t + ih * (1 - v / max);
+  const fx = X(nActual - 1);
+  svgEl('rect', { x: fx, y: m.t, width: W - m.r - fx, height: ih, fill: c.grid, opacity: 0.45 }, svg);
+  for (let t = 0; t <= 4; t++) {
+    const v = (max / 4) * t;
+    svgEl('line', { x1: m.l, x2: W - m.r, y1: Y(v), y2: Y(v), stroke: t === 0 ? c.axis : c.grid, 'stroke-width': 1 }, svg);
+    svgEl('text', { x: m.l - 6, y: Y(v) + 4, 'text-anchor': 'end', 'font-size': 11, fill: c.muted }, svg).textContent = fcAxisLabel(v, pct, money);
+  }
+  const every = xTickEvery(n, iw);
+  keys.forEach((k, i) => { if (i % every === 0) svgEl('text', { x: X(i), y: H - 8, 'text-anchor': 'middle', 'font-size': 11, fill: c.muted }, svg).textContent = idxLabel(k); });
+  svgEl('line', { x1: fx, x2: fx, y1: m.t - 8, y2: m.t + ih, stroke: c.axis, 'stroke-width': 1 }, svg);
+  svgEl('text', { x: fx + 6, y: m.t - 6, 'font-size': 11, fill: c.muted }, svg).textContent = 'Projected';
+  for (const s of series) {
+    const col = c[s.color];
+    let top = '', bottom = '';
+    for (let i = nActual - 1; i < n; i++) { top += (top ? 'L' : 'M') + X(i).toFixed(1) + ',' + Y(s.hi[i]).toFixed(1); bottom = 'L' + X(i).toFixed(1) + ',' + Y(s.lo[i]).toFixed(1) + bottom; }
+    svgEl('path', { d: top + bottom + 'Z', fill: col, opacity: 0.16 }, svg);
+    let d = '', pen = false;
+    for (let i = 0; i < nActual; i++) { const v = s.actual[i]; if (v == null) { pen = false; continue; } d += (pen ? 'L' : 'M') + X(i).toFixed(1) + ',' + Y(v).toFixed(1); pen = true; }
+    svgEl('path', { d, fill: 'none', stroke: col, 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }, svg);
+    let p = '';
+    for (let i = nActual - 1; i < n; i++) p += (p ? 'L' : 'M') + X(i).toFixed(1) + ',' + Y(s.mid[i]).toFixed(1);
+    svgEl('path', { d: p, fill: 'none', stroke: col, 'stroke-width': 2, 'stroke-dasharray': '5 4', 'stroke-linecap': 'round' }, svg);
+    svgEl('circle', { cx: X(n - 1), cy: Y(s.mid[n - 1]), r: 4, fill: col, stroke: c.card, 'stroke-width': 2 }, svg);
+  }
+  const guide = svgEl('line', { y1: m.t, y2: m.t + ih, stroke: c.axis, 'stroke-width': 1, visibility: 'hidden' }, svg);
+  const hit = svgEl('rect', { x: m.l, y: m.t, width: iw, height: ih, fill: 'transparent' }, svg);
+  hit.addEventListener('mousemove', (ev) => {
+    const rect = svg.getBoundingClientRect(), sx = (ev.clientX - rect.left) * (W / rect.width);
+    const i = Math.max(0, Math.min(n - 1, Math.floor((sx - m.l) / bw)));
+    guide.setAttribute('x1', X(i)); guide.setAttribute('x2', X(i)); guide.setAttribute('visibility', 'visible');
+    showTip(tip(i), ev);
+  });
+  hit.addEventListener('mouseleave', () => { guide.setAttribute('visibility', 'hidden'); hideTip(); });
+}
+
+function projections() {
+  const H = S.fcH || 8, N = S.fcBasis || 12, c = T();
+  [['#fcHorizon', 'fcH', [4, 8, 12]], ['#fcBasis', 'fcBasis', [8, 12, 26]]].forEach(([sel, key, opts]) => {
+    const el = $(sel);
+    el.innerHTML = opts.map((v) => `<button type="button" data-v="${v}" aria-pressed="${(S[key] || (key === 'fcH' ? 8 : 12)) === v}">${v} weeks</button>`).join('');
+    el.onclick = (e) => { const b = e.target.closest('button'); if (!b) return; S[key] = +b.dataset.v; saveState(); render(); };
+  });
+  const clear = (msg) => { for (const s of ['#fcTiles', '#fcVol', '#fcOtp', '#fcRev', '#fcTable']) $(s).innerHTML = ''; $('#fcNote').textContent = msg; };
+  const shipT = trimPartial(weekly(DATA.ship, [7])), podT = trimPartial(weekly(DATA.pod, [7, 8, 9, 10]));
+  const ship = shipT.series, pod = podT.series;
+  if (ship.length < 4 || pod.length < 4) { clear('Not enough weekly history for these filters. Projections need at least 4 full weeks.'); return; }
+  const sb = ship.slice(-N), pb = pod.slice(-N);
+  const vol = trendProject(sb.map((p) => p.v[0]), H), rev = trendProject(pb.map((p) => p.v[3]), H);
+  const gross = rateProject(pb.map((p) => p.v[0] - p.v[1]), pb.map((p) => p.v[0]), H);
+  const net = rateProject(pb.map((p) => p.v[0] - p.v[2]), pb.map((p) => p.v[0]), H);
+  if (!gross) { clear('No delivered shipments in the basis weeks for these filters.'); return; }
+
+  const notes = [`Based on ${sb.length} full ship weeks (week of ${idxLabel(sb[0].k)} to week of ${idxLabel(sb[sb.length - 1].k)}).`];
+  if (shipT.dropped) notes.push(`The week of ${idxLabel(shipT.dropped.k)} is left out because it has only ${fmtN(shipT.dropped.v[0])} HAWBs so far, which looks like a partial week.`);
+  if (sb.length < N) notes.push(`Only ${sb.length} weeks of history are available for these filters.`);
+  notes.push('Weeks with a holiday usually come in lower than projected.');
+  $('#fcNote').textContent = notes.join(' ');
+
+  const sum = (a, f) => a.reduce((s, x) => s + x[f], 0);
+  const trendPct = vol.mean ? vol.slope / vol.mean : 0;
+  const tile = (label, v, d) => `<div class="ktile"><div class="eyebrow">${label}</div><div class="v">${v}</div>${d ? `<div class="d">${d}</div>` : ''}</div>`;
+  $('#fcTiles').innerHTML =
+    tile(`HAWBs, next ${H} weeks`, fmtN(sum(vol.out, 'mid')), `likely ${fmtN(sum(vol.out, 'lo'))} – ${fmtN(sum(vol.out, 'hi'))}`) +
+    tile('Recent trend', (trendPct >= 0 ? '+' : '') + (trendPct * 100).toFixed(1) + '% a week', `${trendPct >= 0 ? 'more' : 'fewer'} HAWBs each week over the last ${sb.length} weeks`) +
+    tile('Projected gross OTP', fmtP(gross[0].mid), `likely ${fmtP(gross[0].lo)} – ${fmtP(gross[0].hi)} in a given week`) +
+    tile('Projected net OTP', fmtP(net[0].mid, 2), `likely ${fmtP(net[0].lo, 2)} – ${fmtP(net[0].hi, 2)} in a given week`) +
+    tile(`Revenue, next ${H} weeks`, fmt$c(sum(rev.out, 'mid')), `likely ${fmt$c(sum(rev.out, 'lo'))} – ${fmt$c(sum(rev.out, 'hi'))}`);
+
+  // chart series: up to 26 actual weeks, then H projected weeks joined at the last actual week
+  const build = (hist, val, proj) => {
+    const a = hist.slice(-Math.min(26, hist.length)), last = a[a.length - 1];
+    const keys = a.map((p) => p.k).concat(proj.map((_, h) => last.k + h + 1));
+    const actual = a.map(val), lv = actual[actual.length - 1];
+    const pad = (f) => Array(a.length - 1).fill(null).concat([lv], proj.map((p) => p[f]));
+    return { keys, nActual: a.length, actual, mid: pad('mid'), lo: pad('lo'), hi: pad('hi') };
+  };
+  const head = (keys, i, isP) => `<div class="tt">Week of ${idxLabel(keys[i])}${isP ? ' · projected' : ''}</div>`;
+  const v = build(ship, (p) => p.v[0], vol.out);
+  fcChart($('#fcVol'), v.keys, v.nActual, [{ color: 's1', ...v }], { tip: (i) => {
+    const isP = i >= v.nActual;
+    return head(v.keys, i, isP) + (isP ? row('Projected HAWBs', fmtN(v.mid[i]), c.s1) + row('Likely range', `${fmtN(v.lo[i])} – ${fmtN(v.hi[i])}`) : row('HAWBs shipped', fmtN(v.actual[i]), c.s1));
+  } });
+  const rate = (f) => (p) => (p.v[0] ? 1 - p.v[f] / p.v[0] : null);
+  const g = build(pod, rate(1), gross), nn = build(pod, rate(2), net);
+  fcChart($('#fcOtp'), g.keys, g.nActual, [{ color: 's1', ...g }, { color: 's2', ...nn }], { pct: true, tip: (i) => {
+    const isP = i >= g.nActual;
+    return head(g.keys, i, isP) + (isP
+      ? row('Gross on-time', `${fmtP(g.mid[i])} (${fmtP(g.lo[i])} – ${fmtP(g.hi[i])})`, c.s1) + row('Net on-time', `${fmtP(nn.mid[i], 2)} (${fmtP(nn.lo[i], 1)} – ${fmtP(nn.hi[i], 1)})`, c.s2)
+      : row('Gross on-time', fmtP(g.actual[i]), c.s1) + row('Net on-time', fmtP(nn.actual[i], 2), c.s2));
+  } });
+  const r = build(pod, (p) => p.v[3], rev.out);
+  fcChart($('#fcRev'), r.keys, r.nActual, [{ color: 's1', ...r }], { money: true, tip: (i) => {
+    const isP = i >= r.nActual;
+    return head(r.keys, i, isP) + (isP ? row('Projected revenue', fmt$(r.mid[i]), c.s1) + row('Likely range', `${fmt$(r.lo[i])} – ${fmt$(r.hi[i])}`) : row('Delivered revenue', fmt$(r.actual[i]), c.s1));
+  } });
+
+  const lastShip = ship[ship.length - 1].k;
+  const wkName = (h) => `${idxLabel(lastShip + h + 1)}, ${idxDate(lastShip + h + 1).getUTCFullYear()}`;
+  $('#fcTable').innerHTML = `<table><thead><tr><th>Week of</th><th>HAWBs</th><th>range</th><th>Gross OTP</th><th>range</th><th>Net OTP</th><th>range</th><th>Revenue</th><th>range</th></tr></thead><tbody>` +
+    vol.out.map((p, h) => `<tr><td>${wkName(h)}</td><td>${fmtN(p.mid)}</td><td class="rng">${fmtN(p.lo)} – ${fmtN(p.hi)}</td>` +
+      `<td>${fmtP(gross[h].mid)}</td><td class="rng">${fmtP(gross[h].lo)} – ${fmtP(gross[h].hi)}</td>` +
+      `<td>${fmtP(net[h].mid, 2)}</td><td class="rng">${fmtP(net[h].lo, 1)} – ${fmtP(net[h].hi, 1)}</td>` +
+      `<td>${fmt$(rev.out[h].mid)}</td><td class="rng">${fmt$(rev.out[h].lo)} – ${fmt$(rev.out[h].hi)}</td></tr>`).join('') +
+    `<tr class="total"><td>Total</td><td>${fmtN(sum(vol.out, 'mid'))}</td><td class="rng">${fmtN(sum(vol.out, 'lo'))} – ${fmtN(sum(vol.out, 'hi'))}</td><td></td><td></td><td></td><td></td>` +
+    `<td>${fmt$(sum(rev.out, 'mid'))}</td><td class="rng">${fmt$(sum(rev.out, 'lo'))} – ${fmt$(sum(rev.out, 'hi'))}</td></tr></tbody></table>`;
 }
 
 // ---------- render ----------
@@ -492,6 +683,7 @@ function render() {
   if (S.tab === 'otp') { segControl('#otpMetric', 'otpMetric'); matrix('#mOtp', '#mOtpMore', A.podRows, 1, 'otp', { metric: S.otpMetric, search: $('#otpSearch').value }); }
   if (S.tab === 'ship') { shipChart('#cShip2'); matrix('#mShip', '#mShipMore', A.shipRows, 1, 'count', { search: $('#shipSearch').value }); }
   if (S.tab === 'csr') { csrTable(); matrix('#mCsrShip', null, A.shipRows, 3, 'count', { limit: false }); segControl('#csrMetric', 'csrMetric'); matrix('#mCsrOtp', null, A.podRows, 3, 'otp', { metric: S.csrMetric, limit: false }); }
+  if (S.tab === 'fc') projections();
   if (S.tab === 'about') about();
 }
 function update() { saveState(); aggregate(); render(); }

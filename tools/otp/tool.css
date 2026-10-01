@@ -105,6 +105,9 @@
 .legend{display:flex;flex-wrap:wrap;gap:12px;font-size:13px;color:var(--o-ink2)}
 .legend i{display:inline-block;width:14px;height:3px;border-radius:2px;vertical-align:middle;margin-right:6px}
 .legend i.sq{width:10px;height:10px}
+.legend i.dash{background:repeating-linear-gradient(90deg,var(--c) 0 4px,transparent 4px 7px)}
+.legend i.band{background:color-mix(in srgb,var(--c) 22%,transparent)}
+.otp td.rng{color:var(--muted);font-size:12px}
 .chart{width:100%;min-height:120px}
 .chart svg{display:block;width:100%;overflow:visible}
 .chart text{font-family:var(--font);letter-spacing:0}
