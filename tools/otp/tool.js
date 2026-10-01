@@ -22,7 +22,11 @@ const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v
 
 // ---------- loaded data + view state ----------
 let DATA = null, dims = null, NR = 0, months = [], S = null, A = null, RS = new Set();
-const expanded = {};
+// A-Z by name; placeholders such as "#N/A (not on CSR tab)" or "(blank)" go last.
+const byName = (names) => (a, b) => {
+  const x = String(names[a]), y = String(names[b]), px = !/^[a-z0-9]/i.test(x), py = !/^[a-z0-9]/i.test(y);
+  return px !== py ? (px ? 1 : -1) : x.localeCompare(y, 'en', { sensitivity: 'base', numeric: true });
+};
 
 const defaults = () => ({ regions: Array.from({ length: NR }, (_, i) => i), account: -1, csr: -1, cust: -1,
   from: months[0], to: months[months.length - 1], tab: 'dash', otpMetric: 'gross', csrMetric: 'gross', fcH: 8, fcBasis: 12 });
@@ -383,9 +387,7 @@ function matrix(target, moreTarget, facts, col, mode, opts = {}) {
   const el = $(target);
   if (!rowsT.size) { el.innerHTML = emptyMsg('No data for these filters.'); if (moreTarget) $(moreTarget).innerHTML = ''; return; }
   const weeks = sortedKeys(colT), multi = multiYear(weeks), q = (opts.search || '').trim().toLowerCase();
-  let keys = [...rowsT.keys()].filter((k) => !q || String(dims[dimKey][k]).toLowerCase().includes(q)).sort((a, b) => rowsT.get(b).h - rowsT.get(a).h);
-  const LIMIT = 30, full = keys.length;
-  if (opts.limit !== false && !expanded[target] && keys.length > LIMIT) keys = keys.slice(0, LIMIT);
+  const keys = [...rowsT.keys()].filter((k) => !q || String(dims[dimKey][k]).toLowerCase().includes(q)).sort(byName(dims[dimKey]));
   const showRegion = RS.size > 1 && col === 1, metric = mode === 'count' ? 'hawb' : opts.metric;
   const cell = (c, bold) => {
     if (!c || !c.h) return '<td></td>';
@@ -415,8 +417,8 @@ function matrix(target, moreTarget, facts, col, mode, opts = {}) {
   el.onmouseleave = hideTip;
   if (moreTarget) {
     const mt = $(moreTarget);
-    mt.innerHTML = full > LIMIT ? `<span class="note">Showing ${keys.length} of ${full}, sorted by HAWB volume.</span> <button class="otp-linkbtn" type="button">${expanded[target] ? 'Show top 30' : 'Show all ' + full}</button>` : '';
-    const b = mt.querySelector('button'); if (b) b.onclick = () => { expanded[target] = !expanded[target]; render(); };
+    const noun = dimKey === 'cust' ? 'customer' : 'CSR';
+    mt.innerHTML = `<span class="note">${keys.length} ${noun}${keys.length === 1 ? '' : 's'}${q ? ' matching your search' : ''}, A to Z.</span>`;
   }
 }
 
@@ -431,7 +433,7 @@ function csrTable() {
   const get = (k) => { let o = m.get(k); if (!o) m.set(k, (o = { s: 0, h: 0, gl: 0, nl: 0, cust: new Set() })); return o; };
   for (const r of A.shipRows) { const o = get(r[3]); o.s += r[7]; o.cust.add(r[1]); }
   for (const r of A.podRows) { const o = get(r[3]); o.h += r[7]; o.gl += r[8]; o.nl += r[9]; o.cust.add(r[1]); }
-  const keys = [...m.keys()].sort((a, b) => m.get(b).s - m.get(a).s);
+  const keys = [...m.keys()].sort(byName(dims.csr));
   if (!keys.length) { $('#tCsr').innerHTML = emptyMsg('No data for these filters.'); return; }
   $('#tCsr').innerHTML = `<table><thead><tr><th>CSR</th><th>Customers</th><th>Shipped</th><th>Delivered</th><th>Gross late</th><th>Net late</th><th>On-time gross</th><th>On-time net</th></tr></thead><tbody>` +
     keys.map((k) => { const o = m.get(k); return `<tr><td>${esc(dims.csr[k])}</td><td>${o.cust.size}</td><td>${fmtN(o.s)}</td><td>${fmtN(o.h)}</td><td>${fmtN(o.gl)}</td><td>${fmtN(o.nl)}</td><td>${fmtP(o.h ? 1 - o.gl / o.h : null)}</td><td>${fmtP(o.h ? 1 - o.nl / o.h : null, 2)}</td></tr>`; }).join('') +
@@ -682,7 +684,7 @@ function render() {
   if (S.tab === 'dash') { tiles(); otpChart(); shipChart('#cShip'); delayChart($('#cDelay')); regionTable(); weekTable(); }
   if (S.tab === 'otp') { segControl('#otpMetric', 'otpMetric'); matrix('#mOtp', '#mOtpMore', A.podRows, 1, 'otp', { metric: S.otpMetric, search: $('#otpSearch').value }); }
   if (S.tab === 'ship') { shipChart('#cShip2'); matrix('#mShip', '#mShipMore', A.shipRows, 1, 'count', { search: $('#shipSearch').value }); }
-  if (S.tab === 'csr') { csrTable(); matrix('#mCsrShip', null, A.shipRows, 3, 'count', { limit: false }); segControl('#csrMetric', 'csrMetric'); matrix('#mCsrOtp', null, A.podRows, 3, 'otp', { metric: S.csrMetric, limit: false }); }
+  if (S.tab === 'csr') { csrTable(); matrix('#mCsrShip', null, A.shipRows, 3, 'count'); segControl('#csrMetric', 'csrMetric'); matrix('#mCsrOtp', null, A.podRows, 3, 'otp', { metric: S.csrMetric }); }
   if (S.tab === 'fc') projections();
   if (S.tab === 'about') about();
 }
