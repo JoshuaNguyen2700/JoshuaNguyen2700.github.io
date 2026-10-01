@@ -422,7 +422,7 @@ function matrix(target, moreTarget, facts, col, mode, opts = {}) {
 
 function segControl(sel, key) {
   const el = $(sel);
-  el.innerHTML = [['gross', 'Gross %'], ['net', 'Net %'], ['hawb', 'HAWBs']].map(([v, l]) => `<button type="button" data-v="${v}" aria-pressed="${S[key] === v}">${l}</button>`).join('');
+  el.innerHTML = [['hawb', 'HAWBs'], ['gross', 'Gross %'], ['net', 'Net %']].map(([v, l]) => `<button type="button" data-v="${v}" aria-pressed="${S[key] === v}">${l}</button>`).join('');
   el.onclick = (e) => { const b = e.target.closest('button'); if (!b) return; S[key] = b.dataset.v; saveState(); render(); };
 }
 
