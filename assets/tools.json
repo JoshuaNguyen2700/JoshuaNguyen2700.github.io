@@ -16,11 +16,12 @@
       "icon": "icon.svg"
     },
     {
-      "id": "tool-3",
-      "name": "Tool 3",
-      "blurb": "A new tool is on the way.",
-      "status": "soon",
-      "icon": "plus"
+      "id": "apple-report",
+      "name": "Apple report",
+      "blurb": "KPI & Delay Code",
+      "status": "live",
+      "icon": "chart",
+      "standalone": true
     },
     {
       "id": "tool-4",
