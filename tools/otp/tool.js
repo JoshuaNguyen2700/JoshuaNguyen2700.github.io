@@ -979,9 +979,12 @@ document.addEventListener('click', async (e) => {
 });
 
 // ---------- export to PowerPoint ----------
-// Builds a director-ready deck from the current filters with native (editable) PowerPoint charts.
-// The library is shared on the bus and only loaded when someone exports.
-const PPT = { ink: '1D1D1F', muted: '6E6E73', line: 'E3E3E8', tile: 'F5F5F7', blue: '2A78D6', teal: '1BAF7A', orange: 'EB6834', red: 'C9302C', green: '1D8A3A', font: 'Segoe UI' };
+// Builds a board-ready deck from the current filters in a strategy-consulting style: full-sentence
+// action titles, an executive summary, numbered exhibits with source lines, a navy/blue palette with
+// one highlight color, and native (editable) PowerPoint charts. The library is shared on the bus and
+// only loaded when someone exports.
+const PPT = { navy: '051C2C', blue: '2251FF', cyan: '00A9F4', ink: '1A1A1A', body: '333333', muted: '767676', gray: 'B3B3B3', light: 'E6E6E6', pale: 'F4F6F8',
+  red: 'D0021B', green: '00875A', serif: 'Georgia', sans: 'Arial' };
 let pptLoading = null;
 function loadPpt() {
   if (window.PptxGenJS) return Promise.resolve(window.PptxGenJS);
@@ -997,7 +1000,7 @@ function loadPpt() {
   return pptLoading;
 }
 const pctTxt = (p, d = 1) => (p == null || !isFinite(p) ? '–' : (p * 100).toFixed(d) + '%');
-const ptsTxt = (d) => (d == null || !isFinite(d) ? '' : `${d >= 0 ? '▲' : '▼'} ${Math.abs(d * 100).toFixed(1)} pts`);
+const ptsTxt = (d) => (d == null || !isFinite(d) ? '' : `${d >= 0 ? '+' : '–'}${Math.abs(d * 100).toFixed(1)} pts`);
 function filterText() {
   const parts = [S.regions.length === NR ? 'All regions' : S.regions.map((i) => dims.region[i]).join(', ')];
   if (S.account >= 0) parts.push(dims.account[S.account]);
@@ -1010,18 +1013,19 @@ function filterText() {
 function deckData() {
   const done = (k) => k < thisWeek().key;                          // leave out the week in progress
   const podKeys = sortedKeys(A.podW).filter(done), shipKeys = sortedKeys(A.shipW).filter(done);
-  const last = (ks, n) => ks.slice(-n);
   const rate = (ks, f) => { let h = 0, x = 0; for (const k of ks) { const w = A.podW.get(k); h += w.h; x += w[f]; } return h ? 1 - x / h : null; };
-  const recent = last(podKeys, 4), prior = podKeys.slice(-8, -4);
+  const recent = podKeys.slice(-4), prior = podKeys.slice(-8, -4);
   const cust = new Map();
   for (const r of A.podRows) { let o = cust.get(r[1]); if (!o) cust.set(r[1], (o = { h: 0, gl: 0, nl: 0, reg: r[0] })); o.h += r[7]; o.gl += r[8]; o.nl += r[9]; if (o.reg !== r[0]) o.reg = -1; }
   const custRows = [...cust.entries()].map(([k, o]) => ({ name: dims.cust[k], reg: o.reg >= 0 ? dims.region[o.reg] : 'Multiple', ...o, g: 1 - o.gl / o.h, n: 1 - o.nl / o.h }));
   const minVol = Math.max(30, Math.round(A.tot.h * 0.002));
+  const delays = [...A.delay.entries()].map(([k, v]) => ({ label: dims.delay[k], c: v[0], u: v[1], t: v[0] + v[1] })).sort((a, b) => b.t - a.t);
   return {
-    podKeys: last(podKeys, 13), shipKeys: last(shipKeys, 13),
-    grossRecent: rate(recent, 'gl'), grossPrior: rate(prior, 'gl'), netRecent: rate(recent, 'nl'), netPrior: rate(prior, 'nl'), recent, prior,
+    podKeys: podKeys.slice(-13), shipKeys: shipKeys.slice(-13),
+    grossRecent: rate(recent, 'gl'), grossPrior: rate(prior, 'gl'), netRecent: rate(recent, 'nl'), netPrior: rate(prior, 'nl'),
     lowest: custRows.filter((c) => c.h >= minVol).sort((a, b) => a.g - b.g).slice(0, 8), minVol,
     mostCtrl: custRows.filter((c) => c.nl > 0).sort((a, b) => b.nl - a.nl).slice(0, 8),
+    delays, lateTotal: delays.reduce((s, x) => s + x.t, 0), ctrlTotal: delays.reduce((s, x) => s + x.c, 0),
   };
 }
 async function exportPpt() {
@@ -1029,150 +1033,210 @@ async function exportPpt() {
   btn.disabled = true; btn.textContent = 'Preparing…';
   try {
     const PptxGenJS = await loadPpt(), pres = new PptxGenJS();
-    pres.layout = 'LAYOUT_WIDE'; pres.title = 'On-time performance review'; pres.company = '';
-    const W = 13.333, M = 0.55, D = deckData(), t = A.tot, filt = filterText(), tw = thisWeek();
+    pres.layout = 'LAYOUT_WIDE'; pres.title = 'On-time performance review';
+    const W = 13.333, M = 0.6, CW = W - 2 * M, D = deckData(), t = A.tot, filt = filterText(), tw = thisWeek();
     const multi = multiYear([...D.podKeys, ...D.shipKeys]), wl = (k) => wkLabel(k, multi).replace('’', "'");
-    let page = 0;
-    const base = { fontFace: PPT.font, color: PPT.ink };
-    const slide = (title, sub) => {
+    const g = t.h ? 1 - t.gl / t.h : null, n = t.h ? 1 - t.nl / t.h : null;
+    const source = `Source: OTP Dashboard, regional shipment exports (${(DATA.sources || []).length} files), data as of ${fmtBuilt(DATA.generated)}. Scope: ${filt}.`;
+    const sans = { fontFace: PPT.sans, color: PPT.body }, serif = { fontFace: PPT.serif, color: PPT.navy };
+    let page = 0, exhibit = 0;
+
+    // Standard content slide: section tracker, action title, rule, source line and page number.
+    const slide = (tracker, title, note) => {
       const s = pres.addSlide(); page++;
       s.background = { color: 'FFFFFF' };
-      s.addText(title, { ...base, x: M, y: 0.35, w: W - 2 * M, h: 0.6, fontSize: 26, bold: true });
-      if (sub) s.addText(sub, { ...base, x: M, y: 0.92, w: W - 2 * M, h: 0.4, fontSize: 13, color: PPT.muted });
-      s.addShape(pres.ShapeType.line, { x: M, y: 7.0, w: W - 2 * M, h: 0, line: { color: PPT.line, width: 0.75 } });
-      s.addText(`OTP Dashboard · ${filt}`, { ...base, x: M, y: 7.02, w: 10, h: 0.32, fontSize: 9, color: PPT.muted });
-      s.addText(String(page), { ...base, x: W - M - 1, y: 7.02, w: 1, h: 0.32, fontSize: 9, color: PPT.muted, align: 'right' });
+      s.addText(tracker.toUpperCase(), { ...sans, x: M, y: 0.28, w: CW, h: 0.28, fontSize: 9, bold: true, color: PPT.blue, charSpacing: 1.5 });
+      s.addText(title, { ...serif, x: M, y: 0.55, w: CW, h: 0.95, fontSize: 24, valign: 'top', fit: 'shrink' });
+      s.addShape(pres.ShapeType.line, { x: M, y: 1.55, w: CW, h: 0, line: { color: PPT.navy, width: 1 } });
+      s.addText((note ? note + '  ' : '') + source, { ...sans, x: M, y: 6.85, w: CW - 0.8, h: 0.42, fontSize: 8, color: PPT.muted, valign: 'top' });
+      s.addText(String(page), { ...sans, x: W - M - 0.6, y: 6.85, w: 0.6, h: 0.3, fontSize: 9, color: PPT.muted, align: 'right' });
       return s;
     };
-    const axis = { catAxisLabelFontSize: 10, valAxisLabelFontSize: 10, catAxisLabelColor: PPT.muted, valAxisLabelColor: PPT.muted, catAxisLabelFontFace: PPT.font, valAxisLabelFontFace: PPT.font,
-      valGridLine: { color: PPT.line, size: 0.5 }, catGridLine: { style: 'none' }, catAxisLineShow: true, valAxisLineShow: false, legendFontFace: PPT.font, legendFontSize: 11, legendColor: PPT.ink };
-    const cell = (text, o = {}) => ({ text: String(text), options: { fontFace: PPT.font, fontSize: 11, color: PPT.ink, align: 'right', valign: 'middle', ...o } });
-    const head = (cols) => cols.map((c, i) => cell(c, { bold: true, color: PPT.muted, fill: { color: PPT.tile }, align: i ? 'right' : 'left', fontSize: 10 }));
-    const tableOpts = (colW, y = 1.55) => ({ x: M, y, w: colW.reduce((a, b) => a + b, 0), colW, rowH: 0.34, border: { type: 'solid', pt: 0.5, color: PPT.line }, autoPage: false });
+    // Exhibit header above a chart or table: "Exhibit N", what it shows, and the unit.
+    const exhibitHead = (s, x, w, what, unit) => {
+      exhibit++;
+      s.addText([{ text: `Exhibit ${exhibit}`, options: { bold: true, color: PPT.blue, breakLine: true } },
+        { text: what, options: { bold: true, color: PPT.ink, breakLine: true } }, { text: unit, options: { color: PPT.muted } }],
+        { ...sans, x, y: 1.7, w, h: 0.8, fontSize: 11, valign: 'top', paraSpaceAfter: 1 });
+    };
+    // Key takeaways panel at the right of a chart.
+    const takeaways = (s, items, x = W - M - 3.25, w = 3.25) => {
+      s.addShape(pres.ShapeType.rect, { x, y: 1.75, w, h: 4.9, fill: { color: PPT.pale }, line: { color: PPT.pale } });
+      s.addShape(pres.ShapeType.line, { x, y: 1.75, w, h: 0, line: { color: PPT.blue, width: 2.5 } });
+      s.addText('Key takeaways', { ...serif, x: x + 0.2, y: 1.9, w: w - 0.4, h: 0.4, fontSize: 14, bold: true });
+      s.addText(items.map((b) => ({ text: b, options: { bullet: { indent: 12 }, breakLine: true } })),
+        { ...sans, x: x + 0.2, y: 2.35, w: w - 0.4, h: 4.15, fontSize: 11.5, valign: 'top', paraSpaceAfter: 8, color: PPT.body });
+    };
+    const clean = { catAxisLabelFontSize: 10, valAxisLabelFontSize: 10, catAxisLabelColor: PPT.muted, valAxisLabelColor: PPT.muted,
+      catAxisLabelFontFace: PPT.sans, valAxisLabelFontFace: PPT.sans, catAxisLineShow: true, catAxisLineColor: PPT.gray, valAxisLineShow: false,
+      valGridLine: { style: 'none' }, catGridLine: { style: 'none' }, legendFontFace: PPT.sans, legendFontSize: 10, legendColor: PPT.body,
+      dataLabelFontFace: PPT.sans, dataLabelFontSize: 10, dataLabelColor: PPT.ink };
+    const cell = (text, o = {}) => ({ text: String(text), options: { fontFace: PPT.sans, fontSize: 11, color: PPT.body, align: 'right', valign: 'middle', ...o } });
+    const head = (cols) => cols.map((c, i) => cell(c, { bold: true, color: PPT.navy, align: i ? 'right' : 'left', fontSize: 10, border: [{ type: 'none' }, { type: 'none' }, { pt: 1.25, color: PPT.navy }, { type: 'none' }] }));
+    const rowBorder = [{ type: 'none' }, { type: 'none' }, { pt: 0.5, color: PPT.light }, { type: 'none' }];
+    const body = (c) => ({ ...c, options: { ...c.options, border: rowBorder } });
+    const table = (s, rows, x, y, colW, rowH = 0.36) => s.addTable(rows.map((r, i) => (i ? r.map(body) : r)), { x, y, w: colW.reduce((a, b) => a + b, 0), colW, rowH, autoPage: false });
+
+    // ---- derived facts for titles and summary ----
+    const pod = D.podKeys.map((k) => A.podW.get(k)), gw = pod.map((w) => 1 - w.gl / w.h), nw = pod.map((w) => 1 - w.nl / w.h);
+    const regIds = [...new Set([...A.regP.keys(), ...A.regS.keys()])].sort((a, b) => a - b), none = { h: 0, gl: 0, nl: 0, rev: 0 };
+    const regRows = regIds.filter((i) => (A.regP.get(i) || none).h).map((i) => { const p = A.regP.get(i); return { name: dims.region[i], g: 1 - p.gl / p.h, n: 1 - p.nl / p.h, nl: p.nl, h: p.h, s: A.regS.get(i) || 0, rev: p.rev }; });
+    const byG = regRows.slice().sort((a, b) => b.g - a.g), byN = regRows.slice().sort((a, b) => a.n - b.n);
+    const top = D.delays[0], ctrlTop = D.delays.filter((x) => x.c).sort((a, b) => b.c - a.c)[0];
+    const missing = D.delays.find((x) => /missing delay code/i.test(x.label));
+    const dG = D.grossRecent != null && D.grossPrior != null ? D.grossRecent - D.grossPrior : null;
+    const dN = D.netRecent != null && D.netPrior != null ? D.netRecent - D.netPrior : null;
+    const F = fcCompute(4, 12);
 
     // 1. title
     {
       const s = pres.addSlide(); page++;
-      s.background = { color: 'FFFFFF' };
-      s.addShape(pres.ShapeType.rect, { x: 0, y: 0, w: 0.22, h: 7.5, fill: { color: PPT.blue }, line: { color: PPT.blue } });
-      s.addText('On-time performance review', { ...base, x: 0.9, y: 2.2, w: 11.5, h: 1, fontSize: 40, bold: true });
-      s.addText(filt, { ...base, x: 0.9, y: 3.25, w: 11.5, h: 0.5, fontSize: 18, color: PPT.muted });
-      s.addText(`Week ${tw.week} · prepared ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} · data built ${fmtBuilt(DATA.generated)}`,
-        { ...base, x: 0.9, y: 3.85, w: 11.5, h: 0.4, fontSize: 13, color: PPT.muted });
+      s.background = { color: PPT.navy };
+      s.addShape(pres.ShapeType.line, { x: 0.9, y: 2.55, w: 1.2, h: 0, line: { color: PPT.cyan, width: 3 } });
+      s.addText('On-time performance review', { fontFace: PPT.serif, color: 'FFFFFF', x: 0.9, y: 2.75, w: 11, h: 1.0, fontSize: 40 });
+      s.addText(filt, { fontFace: PPT.sans, color: 'D6E4F0', x: 0.9, y: 3.8, w: 11, h: 0.45, fontSize: 16 });
+      s.addText(`Week ${tw.week} review · ${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`,
+        { fontFace: PPT.sans, color: '9FB3C8', x: 0.9, y: 4.3, w: 11, h: 0.4, fontSize: 12 });
+      s.addText('CONFIDENTIAL · INTERNAL USE', { fontFace: PPT.sans, color: '9FB3C8', x: 0.9, y: 6.7, w: 6, h: 0.3, fontSize: 9, charSpacing: 1.5 });
     }
 
-    // 2. headline numbers
+    // 2. executive summary
     {
-      const g = t.h ? 1 - t.gl / t.h : null, n = t.h ? 1 - t.nl / t.h : null;
-      const msg = `Net on-time ${pctTxt(n, 2)} and gross on-time ${pctTxt(g)} on ${fmtN(t.h)} delivered HAWBs; ${fmtN(t.nl)} late shipments were controllable.`;
-      const s = slide('Headline numbers', msg);
-      const dG = D.grossRecent != null && D.grossPrior != null ? D.grossRecent - D.grossPrior : null;
-      const dN = D.netRecent != null && D.netPrior != null ? D.netRecent - D.netPrior : null;
+      const s = slide('Executive summary', 'Net on-time is strong, but gross on-time and missing delay codes need attention');
+      const pts = [
+        ['Service level. ', `Net on-time was ${pctTxt(n, 2)} and gross on-time ${pctTxt(g)} across ${fmtN(t.h)} delivered HAWBs; ${fmtN(t.nl)} late shipments were controllable.`],
+        dG != null ? ['Direction. ', `Over the last 4 full weeks gross on-time moved ${ptsTxt(dG)} and net on-time ${ptsTxt(dN)} versus the prior 4 weeks.`] : null,
+        byG.length > 1 ? ['Regions. ', `${byG[0].name} leads gross on-time at ${pctTxt(byG[0].g)}; ${byG[byG.length - 1].name} trails at ${pctTxt(byG[byG.length - 1].g)}. ${byN[0].name} has the lowest net on-time (${pctTxt(byN[0].n, 2)}).`] : null,
+        top ? ['Root causes. ', `${top.label} explains ${pctTxt(top.t / D.lateTotal)} of late shipments. Only ${pctTxt(D.ctrlTotal / D.lateTotal)} of late shipments carry a controllable code${ctrlTop ? `, led by ${ctrlTop.label} (${fmtN(ctrlTop.c)})` : ''}.`] : null,
+        missing ? ['Data quality. ', `${pctTxt(missing.t / D.lateTotal)} of late shipments (${fmtN(missing.t)}) have no delay code and cannot be classified as controllable or not.`] : null,
+        D.lowest.length ? ['Focus accounts. ', `${D.lowest.slice(0, 3).map((c) => c.name).join(', ')} have the lowest gross on-time; ${D.mostCtrl[0] ? D.mostCtrl[0].name + ' has the most controllable late shipments.' : ''}`] : null,
+        !F.err ? ['Outlook. ', `Volume is projected at about ${fmtN(F.vol.out[0].mid)} HAWBs a week over the next 4 weeks, with gross on-time near ${pctTxt(F.gross[0].mid)}.`] : null,
+      ].filter(Boolean);
+      s.addText(pts.map(([lead, txt]) => [{ text: lead, options: { bold: true, color: PPT.navy, bullet: { indent: 14 } } }, { text: txt, options: { breakLine: true } }]).flat(),
+        { ...sans, x: M, y: 1.8, w: CW, h: 4.9, fontSize: 14, valign: 'top', paraSpaceAfter: 11 });
+    }
+
+    // 3. at a glance
+    {
+      const s = slide('Performance at a glance', `Net on-time stands at ${pctTxt(n, 2)}; ${pctTxt(t.h ? t.gl / t.h : null)} of deliveries missed the due date, mostly for reasons outside our control`);
       const tiles = [
-        ['On-time net', pctTxt(n, 2), dN == null ? '' : `${ptsTxt(dN)} last 4 weeks vs prior 4`, dN],
-        ['On-time gross', pctTxt(g), dG == null ? '' : `${ptsTxt(dG)} last 4 weeks vs prior 4`, dG],
-        ['Controllable late', fmtN(t.nl), 'late with a controllable delay code', null],
-        ['HAWBs shipped', fmtN(t.shipped), 'by ship date in period', null],
-        ['HAWBs delivered', fmtN(t.h), 'with a POD in period', null],
+        ['Net on-time', pctTxt(n, 2), dN == null ? '' : `${ptsTxt(dN)} last 4 wks vs prior 4`, dN],
+        ['Gross on-time', pctTxt(g), dG == null ? '' : `${ptsTxt(dG)} last 4 wks vs prior 4`, dG],
+        ['Controllable late', fmtN(t.nl), `${pctTxt(t.h ? t.nl / t.h : null, 2)} of deliveries`, null],
+        ['HAWBs shipped', fmtN(t.shipped), 'by ship date', null],
+        ['HAWBs delivered', fmtN(t.h), 'with a POD', null],
         ['Revenue', fmt$c(t.rev), 'on delivered HAWBs', null],
       ];
-      const tw2 = (W - 2 * M - 2 * 0.3) / 3, th = 2.25;
+      const tw3 = (CW - 2 * 0.45) / 3;
       tiles.forEach(([lab, val, note, d], i) => {
-        const x = M + (i % 3) * (tw2 + 0.3), y = 1.65 + Math.floor(i / 3) * (th + 0.3);
-        s.addShape(pres.ShapeType.roundRect, { x, y, w: tw2, h: th, fill: { color: PPT.tile }, line: { color: PPT.tile }, rectRadius: 0.12 });
-        s.addText(lab.toUpperCase(), { ...base, x: x + 0.3, y: y + 0.25, w: tw2 - 0.6, h: 0.35, fontSize: 12, bold: true, color: PPT.muted, charSpacing: 1 });
-        s.addText(val, { ...base, x: x + 0.3, y: y + 0.65, w: tw2 - 0.6, h: 0.9, fontSize: 40, bold: true });
-        s.addText(note, { ...base, x: x + 0.3, y: y + 1.6, w: tw2 - 0.6, h: 0.4, fontSize: 12, color: d == null ? PPT.muted : d >= 0 ? PPT.green : PPT.red });
+        const x = M + (i % 3) * (tw3 + 0.45), y = 1.95 + Math.floor(i / 3) * 2.35;
+        s.addShape(pres.ShapeType.line, { x, y, w: tw3, h: 0, line: { color: i < 3 ? PPT.blue : PPT.gray, width: i < 3 ? 2.5 : 1 } });
+        s.addText(lab, { ...sans, x, y: y + 0.12, w: tw3, h: 0.35, fontSize: 12, bold: true, color: PPT.navy });
+        s.addText(val, { ...serif, x, y: y + 0.5, w: tw3, h: 0.95, fontSize: 44 });
+        s.addText(note, { ...sans, x, y: y + 1.45, w: tw3, h: 0.35, fontSize: 11, color: d == null ? PPT.muted : d >= 0 ? PPT.green : PPT.red });
       });
     }
 
-    // 3. OTP trend
+    // 4. on-time trend
     if (D.podKeys.length >= 2) {
-      const labels = D.podKeys.map(wl), gross = D.podKeys.map((k) => { const w = A.podW.get(k); return 1 - w.gl / w.h; }), net = D.podKeys.map((k) => { const w = A.podW.get(k); return 1 - w.nl / w.h; });
-      const s = slide('On-time trend', `Gross and net on-time % by POD week, last ${labels.length} full weeks (${labels[0]} – ${labels[labels.length - 1]})`);
-      s.addChart(pres.ChartType.line, [{ name: 'Gross on-time %', labels, values: gross }, { name: 'Net on-time %', labels, values: net }], {
-        x: M, y: 1.5, w: W - 2 * M, h: 5.3, ...axis, chartColors: [PPT.blue, PPT.teal], lineSize: 3, lineDataSymbol: 'circle', lineDataSymbolSize: 7,
-        valAxisMinVal: 0, valAxisMaxVal: 1, valAxisMajorUnit: 0.25, valAxisLabelFormatCode: '0%', showLegend: true, legendPos: 't',
-        showValue: true, dataLabelFormatCode: '0%', dataLabelFontSize: 9, dataLabelColor: PPT.muted, dataLabelPosition: 't' });
+      const labels = D.podKeys.map(wl), first = gw[0], last = gw[gw.length - 1];
+      const title = `Gross on-time ${last >= first ? 'rose' : 'fell'} from ${pctTxt(first, 0)} to ${pctTxt(last, 0)} over the last ${labels.length} weeks, while net on-time held between ${pctTxt(Math.min(...nw))} and ${pctTxt(Math.max(...nw))}`;
+      const s = slide('Service level', title);
+      const cw = CW - 3.55;
+      exhibitHead(s, M, cw, 'Gross and net on-time by POD week', `% of delivered HAWBs, ${labels[0]} – ${labels[labels.length - 1]}`);
+      s.addChart(pres.ChartType.line, [{ name: 'Net on-time', labels, values: nw }, { name: 'Gross on-time', labels, values: gw }], {
+        x: M, y: 2.5, w: cw, h: 4.2, ...clean, chartColors: [PPT.cyan, PPT.navy], lineSize: 2.5, lineDataSymbol: 'circle', lineDataSymbolSize: 6,
+        valAxisMinVal: 0, valAxisMaxVal: 1, valAxisHidden: true, showLegend: true, legendPos: 'b',
+        showValue: true, dataLabelFormatCode: '0%', dataLabelPosition: 't', dataLabelFontSize: 9 });
+      const best = gw.indexOf(Math.max(...gw)), worst = gw.indexOf(Math.min(...gw));
+      takeaways(s, [
+        `Gross on-time peaked at ${pctTxt(gw[best])} in ${labels[best]} and was lowest at ${pctTxt(gw[worst])} in ${labels[worst]}.`,
+        dG != null ? `Last 4 weeks vs prior 4: gross ${ptsTxt(dG)}, net ${ptsTxt(dN)}.` : `Net on-time stayed between ${pctTxt(Math.min(...nw))} and ${pctTxt(Math.max(...nw))}.`,
+        `The gap between gross and net is mostly appointment and customer-driven delays outside our control.`,
+      ]);
 
-      // 4. net close-up
-      const lo = Math.min(...net), min = Math.max(0, Math.floor((lo - 0.002) * 200) / 200);
-      const s2 = slide('Net on-time close-up', `Net on-time % by POD week on a tight scale (${pctTxt(min)} – 100%), so week-to-week changes are visible`);
-      s2.addChart(pres.ChartType.line, [{ name: 'Net on-time %', labels, values: net }], {
-        x: M, y: 1.5, w: W - 2 * M, h: 5.3, ...axis, chartColors: [PPT.teal], lineSize: 3, lineDataSymbol: 'circle', lineDataSymbolSize: 7,
-        valAxisMinVal: min, valAxisMaxVal: 1, valAxisLabelFormatCode: '0.0%', showLegend: false,
-        showValue: true, dataLabelFormatCode: '0.00%', dataLabelFontSize: 10, dataLabelColor: PPT.ink, dataLabelPosition: 't' });
+      // 5. net close-up
+      const lo = Math.min(...nw), min = Math.max(0, Math.floor((lo - 0.002) * 200) / 200), wN = nw.indexOf(lo);
+      const s2 = slide('Service level', `Net on-time dipped to ${pctTxt(lo, 2)} in ${labels[wN]} and has since recovered to ${pctTxt(nw[nw.length - 1], 2)}`);
+      exhibitHead(s2, M, cw, 'Net on-time by POD week', `% of delivered HAWBs, scale from ${pctTxt(min)} to show week-to-week change`);
+      s2.addChart(pres.ChartType.line, [{ name: 'Net on-time', labels, values: nw }], {
+        x: M, y: 2.5, w: cw, h: 4.2, ...clean, chartColors: [PPT.navy], lineSize: 2.5, lineDataSymbol: 'circle', lineDataSymbolSize: 7,
+        valAxisMinVal: min, valAxisMaxVal: 1, valAxisHidden: true, showLegend: false,
+        showValue: true, dataLabelFormatCode: '0.00%', dataLabelPosition: 't', dataLabelFontSize: 9 });
+      takeaways(s2, [
+        `Lowest week: ${labels[wN]} at ${pctTxt(lo, 2)}.`,
+        `Latest full week: ${labels[labels.length - 1]} at ${pctTxt(nw[nw.length - 1], 2)}.`,
+        `Each 0.1 pt of net on-time is about ${fmtN(pod.reduce((s, w) => s + w.h, 0) / pod.length * 0.001)} HAWBs a week at recent volume.`,
+      ]);
     }
 
-    // 5. volume
+    // 6. volume
     if (D.shipKeys.length) {
       const labels = D.shipKeys.map(wl), vals = D.shipKeys.map((k) => A.shipW.get(k));
-      const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
-      const s = slide('Shipment volume', `HAWBs shipped per week, last ${labels.length} full weeks · average ${fmtN(avg)} a week`);
+      const avg = vals.reduce((a, b) => a + b, 0) / vals.length, lastV = vals[vals.length - 1], d = avg ? lastV / avg - 1 : 0;
+      const s = slide('Volume', `Volume averaged ${fmtN(avg)} HAWBs a week; the latest full week was ${Math.abs(d * 100).toFixed(0)}% ${d >= 0 ? 'above' : 'below'} that average`);
+      const cw = CW - 3.55;
+      exhibitHead(s, M, cw, 'HAWBs shipped per week', `Count by ship week, ${labels[0]} – ${labels[labels.length - 1]}`);
       s.addChart(pres.ChartType.bar, [{ name: 'HAWBs shipped', labels, values: vals }], {
-        x: M, y: 1.5, w: W - 2 * M, h: 5.3, ...axis, barDir: 'col', barGapWidthPct: 55, chartColors: [PPT.blue], showLegend: false,
-        valAxisLabelFormatCode: '#,##0', showValue: true, dataLabelFormatCode: '#,##0', dataLabelFontSize: 9, dataLabelColor: PPT.muted, dataLabelPosition: 'outEnd' });
+        x: M, y: 2.5, w: cw, h: 4.2, ...clean, barDir: 'col', barGapWidthPct: 45, chartColors: vals.map((_, i) => (i === vals.length - 1 ? PPT.blue : PPT.navy)),
+        valAxisHidden: true, showLegend: false, showValue: true, dataLabelFormatCode: '#,##0', dataLabelPosition: 'outEnd', dataLabelFontSize: 9 });
+      const hi = vals.indexOf(Math.max(...vals)), loI = vals.indexOf(Math.min(...vals));
+      takeaways(s, [`Highest week: ${labels[hi]} with ${fmtN(vals[hi])} HAWBs.`, `Lowest week: ${labels[loI]} with ${fmtN(vals[loI])} HAWBs.`,
+        `${fmtN(t.shipped)} HAWBs shipped in the selected period.`]);
     }
 
-    // 6. by region
-    {
-      const ids = [...new Set([...A.regP.keys(), ...A.regS.keys()])].sort((a, b) => a - b), none = { h: 0, gl: 0, nl: 0, rev: 0 };
-      const row = (name, sh, p, bold) => [cell(name, { align: 'left', bold }), cell(fmtN(sh), { bold }), cell(fmtN(p.h), { bold }), cell(fmt$c(p.rev), { bold }),
-        cell(p.h ? pctTxt(1 - p.gl / p.h) : '–', { bold }), cell(p.h ? pctTxt(1 - p.nl / p.h, 2) : '–', { bold }), cell(fmtN(p.nl), { bold })];
-      const rows = [head(['Region', 'Shipped', 'Delivered', 'Revenue', 'Gross OTP', 'Net OTP', 'Controllable late']),
-        ...ids.map((i) => row(dims.region[i], A.regS.get(i) || 0, A.regP.get(i) || none)), row('Total', t.shipped, t, true)];
-      const s = slide('By region', 'Shipped by ship date, delivered and on-time by POD date, in the selected period');
-      s.addTable(rows, tableOpts([3.2, 1.45, 1.45, 1.45, 1.45, 1.45, 1.75]));
-      const withPod = ids.filter((i) => (A.regP.get(i) || none).h);
-      if (withPod.length > 1) {
-        const labels = withPod.map((i) => dims.region[i]), rate = (i, f) => { const p = A.regP.get(i); return 1 - p[f] / p.h; };
-        s.addChart(pres.ChartType.bar, [{ name: 'Gross on-time %', labels, values: withPod.map((i) => rate(i, 'gl')) }, { name: 'Net on-time %', labels, values: withPod.map((i) => rate(i, 'nl')) }], {
-          x: M, y: 1.55 + 0.34 * (ids.length + 2) + 0.25, w: W - 2 * M, h: Math.max(2.2, 6.85 - (1.55 + 0.34 * (ids.length + 2) + 0.25)), ...axis, barDir: 'col', barGapWidthPct: 70,
-          chartColors: [PPT.blue, PPT.teal], valAxisMinVal: 0, valAxisMaxVal: 1, valAxisMajorUnit: 0.25, valAxisLabelFormatCode: '0%', showLegend: true, legendPos: 'r',
-          showValue: true, dataLabelFormatCode: '0.0%', dataLabelFontSize: 9, dataLabelColor: PPT.muted, dataLabelPosition: 'outEnd' });
-      }
-    }
-
-    // 7. delay codes
-    {
-      const items = [...A.delay.entries()].map(([k, v]) => ({ label: dims.delay[k], c: v[0], u: v[1], t: v[0] + v[1] })).sort((a, b) => b.t - a.t);
-      const total = items.reduce((s, x) => s + x.t, 0);
-      if (total) {
-        const top = items.slice(0, 8);
-        if (items.length > 8) { const rest = items.slice(8); top.push({ label: 'Other', c: rest.reduce((s, x) => s + x.c, 0), u: rest.reduce((s, x) => s + x.u, 0) }); }
-        const ctrl = items.reduce((s, x) => s + x.c, 0);
-        const s = slide('Why shipments were late', `${fmtN(total)} late HAWBs · ${pctTxt(ctrl / total)} carried a controllable delay code · top reason: ${items[0].label} (${pctTxt(items[0].t / total)})`);
-        const half = (W - 2 * M - 0.4) / 2;
-        s.addText('All late shipments: top reasons', { ...base, x: M, y: 1.45, w: half, h: 0.35, fontSize: 14, bold: true });
-        const top8 = items.slice(0, 8);
-        s.addChart(pres.ChartType.bar, [{ name: 'Late HAWBs', labels: top8.map((x) => x.label), values: top8.map((x) => x.t / total) }], {
-          x: M, y: 1.85, w: half, h: 4.6, ...axis, barDir: 'bar', barGapWidthPct: 45, chartColors: [PPT.blue], catAxisOrientation: 'maxMin', showLegend: false,
-          valAxisHidden: true, valGridLine: { style: 'none' }, catAxisLabelFontSize: 10, showValue: true, dataLabelFormatCode: '0%', dataLabelFontSize: 10, dataLabelColor: PPT.ink, dataLabelPosition: 'outEnd' });
-        const ctrlItems = items.filter((x) => x.c > 0).sort((a, b) => b.c - a.c).slice(0, 8), x2 = M + half + 0.4;
-        s.addText(`Controllable late (${fmtN(ctrl)}): reasons`, { ...base, x: x2, y: 1.45, w: half, h: 0.35, fontSize: 14, bold: true });
-        if (ctrlItems.length) s.addChart(pres.ChartType.bar, [{ name: 'Controllable late', labels: ctrlItems.map((x) => x.label), values: ctrlItems.map((x) => x.c) }], {
-          x: x2, y: 1.85, w: half, h: 4.6, ...axis, barDir: 'bar', barGapWidthPct: 45, chartColors: [PPT.orange], catAxisOrientation: 'maxMin', showLegend: false,
-          valAxisHidden: true, valGridLine: { style: 'none' }, catAxisLabelFontSize: 10, showValue: true, dataLabelFormatCode: '#,##0', dataLabelFontSize: 10, dataLabelColor: PPT.ink, dataLabelPosition: 'outEnd' });
-        const missing = items.find((x) => /missing delay code/i.test(x.label));
-        if (missing) s.addText(`Data gap: ${fmtN(missing.t)} late HAWBs (${pctTxt(missing.t / total)}) have no delay code, so they cannot be classed as controllable or not.`,
-          { ...base, x: M, y: 6.5, w: W - 2 * M, h: 0.4, fontSize: 12, color: PPT.red });
-      }
-    }
-
-    // 8. where to act
-    if (D.lowest.length || D.mostCtrl.length) {
-      const s = slide('Where to act', `Customers with the lowest gross on-time (at least ${fmtN(D.minVol)} delivered) and the most controllable late shipments`);
-      const colW = [3.0, 1.0, 1.0, 1.0];
-      s.addText('Lowest gross on-time', { ...base, x: M, y: 1.45, w: 5.6, h: 0.35, fontSize: 14, bold: true });
-      s.addTable([head(['Customer', 'Delivered', 'Gross', 'Net']), ...D.lowest.map((c) => [cell(c.name, { align: 'left', fontSize: 10 }), cell(fmtN(c.h), { fontSize: 10 }),
-        cell(pctTxt(c.g), { fontSize: 10, bold: true, color: PPT.red }), cell(pctTxt(c.n, 2), { fontSize: 10 })])], { ...tableOpts(colW, 1.85), rowH: 0.5 });
+    // 7. regions
+    if (regRows.length) {
+      const title = regRows.length > 1 ? `${byG[0].name} leads gross on-time at ${pctTxt(byG[0].g)}, ${((byG[0].g - byG[byG.length - 1].g) * 100).toFixed(0)} pts ahead of ${byG[byG.length - 1].name}; ${byN[0].name} has the lowest net on-time`
+        : `${regRows[0].name}: gross on-time ${pctTxt(regRows[0].g)}, net on-time ${pctTxt(regRows[0].n, 2)}`;
+      const s = slide('Regions', title);
+      exhibitHead(s, M, 6.0, 'Gross on-time by region', '% of delivered HAWBs, ranked');
+      s.addChart(pres.ChartType.bar, [{ name: 'Gross on-time', labels: byG.map((r) => r.name), values: byG.map((r) => r.g) }], {
+        x: M, y: 2.5, w: 5.9, h: 4.1, ...clean, barDir: 'bar', catAxisOrientation: 'maxMin', barGapWidthPct: 40, valAxisHidden: true, valAxisMinVal: 0, valAxisMaxVal: 1,
+        chartColors: byG.map((r) => (r.g < g ? PPT.blue : PPT.navy)), showLegend: false, showValue: true, dataLabelFormatCode: '0%', dataLabelPosition: 'outEnd', catAxisLabelFontSize: 11 });
       const x2 = M + 6.2;
-      s.addText('Most controllable late', { ...base, x: x2, y: 1.45, w: 5.6, h: 0.35, fontSize: 14, bold: true });
-      s.addTable([head(['Customer', 'Delivered', 'Ctrl. late', 'Net']), ...D.mostCtrl.map((c) => [cell(c.name, { align: 'left', fontSize: 10 }), cell(fmtN(c.h), { fontSize: 10 }),
-        cell(fmtN(c.nl), { fontSize: 10, bold: true, color: PPT.orange }), cell(pctTxt(c.n, 2), { fontSize: 10 })])], { ...tableOpts(colW, 1.85), x: x2, rowH: 0.5 });
+      exhibitHead(s, x2, CW - 6.2, 'Regional scorecard', 'Selected period');
+      table(s, [head(['Region', 'Delivered', 'Gross', 'Net', 'Ctrl. late']),
+        ...byG.map((r) => [cell(r.name, { align: 'left' }), cell(fmtN(r.h)), cell(pctTxt(r.g), { color: r.g < g ? PPT.blue : PPT.body, bold: r.g < g }), cell(pctTxt(r.n, 2), { color: r.n < n ? PPT.red : PPT.body }), cell(fmtN(r.nl))]),
+        [cell('Total', { align: 'left', bold: true }), cell(fmtN(t.h), { bold: true }), cell(pctTxt(g), { bold: true }), cell(pctTxt(n, 2), { bold: true }), cell(fmtN(t.nl), { bold: true })]],
+        x2, 2.55, [1.8, 1.2, 0.95, 0.95, 1.0], 0.4);
+      s.addText('Blue: gross on-time below the overall average. Red: net on-time below the overall average.', { ...sans, x: x2, y: 6.4, w: CW - 6.2, h: 0.3, fontSize: 9, color: PPT.muted });
     }
 
-    // 9. CSR summary
+    // 8. root causes
+    if (D.lateTotal) {
+      const s = slide('Root causes', `${top.label} drives ${pctTxt(top.t / D.lateTotal, 0)} of late shipments; controllable delays are only ${pctTxt(D.ctrlTotal / D.lateTotal)}${ctrlTop ? `, led by ${ctrlTop.label}` : ''}`,
+        missing ? `${fmtN(missing.t)} late HAWBs (${pctTxt(missing.t / D.lateTotal)}) have no delay code.` : '');
+      const half = (CW - 0.5) / 2, top8 = D.delays.slice(0, 8);
+      exhibitHead(s, M, half, 'All late shipments by delay reason', '% of late HAWBs, top 8');
+      s.addChart(pres.ChartType.bar, [{ name: 'Share', labels: top8.map((x) => x.label), values: top8.map((x) => x.t / D.lateTotal) }], {
+        x: M, y: 2.5, w: half, h: 4.2, ...clean, barDir: 'bar', catAxisOrientation: 'maxMin', barGapWidthPct: 40, valAxisHidden: true,
+        chartColors: top8.map((x) => (/missing delay code/i.test(x.label) ? PPT.red : x === top ? PPT.navy : PPT.gray)), showLegend: false,
+        showValue: true, dataLabelFormatCode: '0%', dataLabelPosition: 'outEnd', catAxisLabelFontSize: 10 });
+      const ctrlItems = D.delays.filter((x) => x.c > 0).sort((a, b) => b.c - a.c).slice(0, 8), x2 = M + half + 0.5;
+      exhibitHead(s, x2, half, `Controllable late shipments by reason`, `Count of HAWBs, ${fmtN(D.ctrlTotal)} in total`);
+      if (ctrlItems.length) s.addChart(pres.ChartType.bar, [{ name: 'Controllable', labels: ctrlItems.map((x) => x.label), values: ctrlItems.map((x) => x.c) }], {
+        x: x2, y: 2.5, w: half, h: 4.2, ...clean, barDir: 'bar', catAxisOrientation: 'maxMin', barGapWidthPct: 40, valAxisHidden: true,
+        chartColors: ctrlItems.map((_, i) => (i < 3 ? PPT.blue : PPT.gray)), showLegend: false,
+        showValue: true, dataLabelFormatCode: '#,##0', dataLabelPosition: 'outEnd', catAxisLabelFontSize: 10 });
+    }
+
+    // 9. where to act
+    if (D.lowest.length || D.mostCtrl.length) {
+      const worst = D.lowest[0], most = D.mostCtrl[0];
+      const s = slide('Priorities', `${D.lowest.length} accounts sit below ${pctTxt(D.lowest[D.lowest.length - 1]?.g, 0)} gross on-time${most ? `; ${most.name} carries the most controllable late shipments (${fmtN(most.nl)})` : ''}`);
+      const half = (CW - 0.5) / 2, colW = [2.75, 1.0, 1.0, 1.0];
+      exhibitHead(s, M, half, 'Lowest gross on-time accounts', `At least ${fmtN(D.minVol)} delivered HAWBs`);
+      table(s, [head(['Customer', 'Delivered', 'Gross', 'Net']), ...D.lowest.map((c) => [cell(c.name, { align: 'left', fontSize: 10 }), cell(fmtN(c.h), { fontSize: 10 }),
+        cell(pctTxt(c.g), { fontSize: 10, bold: true, color: PPT.blue }), cell(pctTxt(c.n, 2), { fontSize: 10 })])], M, 2.55, colW, 0.42);
+      const x2 = M + half + 0.5;
+      exhibitHead(s, x2, half, 'Most controllable late shipments', 'Count of late HAWBs with a controllable code');
+      table(s, [head(['Customer', 'Delivered', 'Ctrl. late', 'Net']), ...D.mostCtrl.map((c) => [cell(c.name, { align: 'left', fontSize: 10 }), cell(fmtN(c.h), { fontSize: 10 }),
+        cell(fmtN(c.nl), { fontSize: 10, bold: true, color: PPT.blue }), cell(pctTxt(c.n, 2), { fontSize: 10 })])], x2, 2.55, colW, 0.42);
+      if (worst) s.addText(`Suggested next step: review lane and appointment practices with ${worst.name} and the top controllable-late accounts.`, { ...sans, x: M, y: 6.45, w: CW, h: 0.3, fontSize: 11, italic: true, color: PPT.navy });
+    }
+
+    // 10. CSR summary
     {
       const ship = csrShipRows(), m = new Map();
       const get = (k) => { let o = m.get(k); if (!o) m.set(k, (o = { s: 0, h: 0, gl: 0, nl: 0 })); return o; };
@@ -1180,45 +1244,50 @@ async function exportPpt() {
       for (const r of A.podRows) { const o = get(r[3]); o.h += r[7]; o.gl += r[8]; o.nl += r[9]; }
       const keys = [...m.keys()].sort((a, b) => m.get(b).s - m.get(a).s);
       if (keys.length) {
-        const shown = keys.slice(0, 14);
-        const s = slide('CSR summary', `${S.csrVol === 'adj' ? 'Adjusted shipment volume (Jesus Quiroga ⅓ → Mindy Wilson for COSTCO+)' : 'Raw shipment volume'} · by volume${keys.length > shown.length ? ` · top ${shown.length} of ${keys.length}` : ''}`);
-        s.addTable([head(['CSR', 'Shipped', 'Delivered', 'Gross OTP', 'Net OTP', 'Controllable late']),
-          ...shown.map((k) => { const o = m.get(k); return [cell(dims.csr[k], { align: 'left', fontSize: 10 }), cell(fmtN(o.s), { fontSize: 10 }), cell(fmtN(o.h), { fontSize: 10 }),
-            cell(o.h ? pctTxt(1 - o.gl / o.h) : '–', { fontSize: 10 }), cell(o.h ? pctTxt(1 - o.nl / o.h, 2) : '–', { fontSize: 10 }), cell(fmtN(o.nl), { fontSize: 10 })]; })],
-          { ...tableOpts([3.6, 1.6, 1.6, 1.6, 1.6, 2.0]), rowH: 0.3 });
+        const shown = keys.slice(0, 12), lead = m.get(keys[0]);
+        const withPod = shown.filter((k) => m.get(k).h), nets = withPod.map((k) => 1 - m.get(k).nl / m.get(k).h);
+        const s = slide('Customer service', `${dims.csr[keys[0]]} handles the most volume (${fmtN(lead.s)} HAWBs); net on-time ranges from ${pctTxt(Math.min(...nets), 2)} to ${pctTxt(Math.max(...nets), 2)} across the largest CSRs`,
+          S.csrVol === 'adj' ? 'Volume adjusted: Jesus Quiroga keeps 2/3 of COSTCO+ shipments, 1/3 credited to Mindy Wilson.' : '');
+        exhibitHead(s, M, CW, 'CSR scorecard', `Top ${shown.length} of ${keys.length} by shipped volume`);
+        table(s, [head(['CSR', 'Shipped', 'Delivered', 'Gross on-time', 'Net on-time', 'Controllable late']),
+          ...shown.map((k) => { const o = m.get(k), nn2 = o.h ? 1 - o.nl / o.h : null; return [cell(dims.csr[k], { align: 'left', fontSize: 10 }), cell(fmtN(o.s), { fontSize: 10 }), cell(fmtN(o.h), { fontSize: 10 }),
+            cell(o.h ? pctTxt(1 - o.gl / o.h) : '–', { fontSize: 10 }), cell(pctTxt(nn2, 2), { fontSize: 10, color: nn2 != null && nn2 < n ? PPT.red : PPT.body }), cell(fmtN(o.nl), { fontSize: 10 })]; })],
+          M, 2.55, [3.7, 1.6, 1.6, 1.75, 1.75, 1.73], 0.3);
       }
     }
 
-    // 10. outlook (next 4 weeks from the last 12 full weeks)
-    {
-      const F = fcCompute(4, 12);
-      if (!F.err) {
-        const hist = F.ship.slice(-8), lastK = hist[hist.length - 1].k;
-        const labels = [...hist.map((p) => idxLabel(p.k)), ...F.vol.out.map((_, h) => idxLabel(lastK + h + 1))];
-        const actual = [...hist.map((p) => p.v[0]), ...F.vol.out.map(() => null)], proj = [...hist.map(() => null), ...F.vol.out.map((p) => Math.round(p.mid))];
-        const s = slide('Outlook: next 4 weeks', `Projection from the last ${F.sb.length} full weeks · gross on-time about ${pctTxt(F.gross[0].mid)}, net about ${pctTxt(F.net[0].mid, 2)} · a guide, not a commitment`);
-        s.addChart(pres.ChartType.bar, [{ name: 'Actual HAWBs shipped', labels, values: actual }, { name: 'Projected', labels, values: proj }], {
-          x: M, y: 1.5, w: 7.3, h: 5.2, ...axis, barDir: 'col', barGrouping: 'clustered', barGapWidthPct: 40, barOverlapPct: 100, chartColors: [PPT.blue, 'A9C9F0'], valAxisMinVal: 0,
-          valAxisLabelFormatCode: '#,##0', showLegend: true, legendPos: 't', catAxisLabelFontSize: 9 });
-        const colW = [1.25, 2.0, 1.3];
-        s.addTable([head(['Week of', 'HAWBs (likely range)', 'Gross / Net']),
-          ...F.vol.out.map((p, h) => [cell(idxLabel(lastK + h + 1), { align: 'left', fontSize: 10 }), cell(`${fmtN(p.mid)}\n${fmtN(p.lo)} – ${fmtN(p.hi)}`, { fontSize: 10 }),
-            cell(`${pctTxt(F.gross[h].mid)}\n${pctTxt(F.net[h].mid, 2)}`, { fontSize: 10 })])], { ...tableOpts(colW, 1.7), x: M + 7.6, rowH: 0.62 });
-      }
+    // 11. outlook
+    if (!F.err) {
+      const hist = F.ship.slice(-8), lastK = hist[hist.length - 1].k, avg4 = F.vol.out.reduce((s, p) => s + p.mid, 0) / F.vol.out.length;
+      const s = slide('Outlook', `Volume is projected at about ${fmtN(avg4)} HAWBs a week over the next 4 weeks, with gross on-time near ${pctTxt(F.gross[0].mid, 0)} and net near ${pctTxt(F.net[0].mid, 1)}`,
+        `Projection: trend of the last ${F.sb.length} full weeks; range covers about 8 in 10 weeks. A guide, not a commitment.`);
+      const labels = [...hist.map((p) => idxLabel(p.k)), ...F.vol.out.map((_, h) => idxLabel(lastK + h + 1))];
+      const cw = 7.4;
+      exhibitHead(s, M, cw, 'HAWBs shipped per week, actual and projected', 'Count by ship week');
+      s.addChart(pres.ChartType.bar, [{ name: 'Actual', labels, values: [...hist.map((p) => p.v[0]), ...F.vol.out.map(() => null)] },
+        { name: 'Projected', labels, values: [...hist.map(() => null), ...F.vol.out.map((p) => Math.round(p.mid))] }], {
+        x: M, y: 2.5, w: cw, h: 4.2, ...clean, barDir: 'col', barGrouping: 'clustered', barGapWidthPct: 40, barOverlapPct: 100, chartColors: [PPT.navy, PPT.cyan],
+        valAxisMinVal: 0, valAxisHidden: true, showLegend: true, legendPos: 't', showValue: true, dataLabelFormatCode: '#,##0', dataLabelPosition: 'outEnd', dataLabelFontSize: 8, catAxisLabelFontSize: 9 });
+      const x2 = M + cw + 0.4;
+      exhibitHead(s, x2, CW - cw - 0.4, 'Projected weeks', 'Likely range in brackets');
+      table(s, [head(['Week of', 'HAWBs', 'Gross', 'Net']),
+        ...F.vol.out.map((p, h) => [cell(idxLabel(lastK + h + 1), { align: 'left', fontSize: 10 }), cell(`${fmtN(p.mid)}\n(${fmtN(p.lo)}–${fmtN(p.hi)})`, { fontSize: 10 }),
+          cell(pctTxt(F.gross[h].mid), { fontSize: 10 }), cell(pctTxt(F.net[h].mid, 2), { fontSize: 10 })])], x2, 2.55, [1.05, 1.55, 0.8, 0.93], 0.62);
     }
 
-    // 11. notes
+    // 12. definitions
     {
-      const s = slide('Definitions and notes');
-      const bullets = [
-        'Gross on-time: delivered on or before the adjusted due date (ship date + SLA workdays, +1 per origin/destination zone outside A–E, excluding holidays).',
-        'Net on-time: a late shipment only counts against it when its delay code is Controllable.',
-        'Weeks start Monday (Excel WEEKNUM type 2). COSTCO+ and AMAZON use ISO weeks, so Dec 29 – Jan 4 is week 1 for them.',
-        `The week in progress (week ${tw.week}) is left out of the weekly charts.`,
-        'CSR volume can be adjusted: Jesus Quiroga keeps 2/3 of his COSTCO+ shipments and 1/3 is credited to Mindy Wilson.',
-        `Data built ${fmtBuilt(DATA.generated)} from ${(DATA.sources || []).join(', ')}.`,
+      const s = slide('Appendix', 'Definitions and methodology');
+      const items = [
+        ['Gross on-time. ', 'Delivered on or before the adjusted due date: ship date plus SLA workdays, +1 day for each origin or destination zone outside A–E, excluding holidays.'],
+        ['Net on-time. ', 'A late shipment counts against net on-time only when its delay code is Controllable.'],
+        ['Weeks. ', 'Weeks start Monday (Excel WEEKNUM type 2). COSTCO+ and AMAZON use ISO weeks, so Dec 29 – Jan 4 is week 1 for them. The week in progress is excluded from weekly exhibits.'],
+        ['CSR volume. ', 'Adjusted view: Jesus Quiroga keeps 2/3 of his COSTCO+ shipments and 1/3 is credited to Mindy Wilson.'],
+        ['Projections. ', 'Damped linear trend over the last 12 full weeks for volume; volume-weighted average for on-time %. Ranges cover about 8 in 10 weeks.'],
+        ['Data. ', `${(DATA.sources || []).join(', ')}; built ${fmtBuilt(DATA.generated)}.`],
       ];
-      s.addText(bullets.map((b) => ({ text: b, options: { bullet: true, breakLine: true } })), { ...base, x: M, y: 1.3, w: W - 2 * M, h: 5.4, fontSize: 15, valign: 'top', paraSpaceAfter: 10 });
+      s.addText(items.map(([lead, txt]) => [{ text: lead, options: { bold: true, color: PPT.navy, bullet: { indent: 14 } } }, { text: txt, options: { breakLine: true } }]).flat(),
+        { ...sans, x: M, y: 1.8, w: CW, h: 4.9, fontSize: 13, valign: 'top', paraSpaceAfter: 10 });
     }
 
     const name = ('OTP review - ' + filt).replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ').slice(0, 150) + '.pptx';
