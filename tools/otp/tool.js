@@ -978,6 +978,151 @@ document.addEventListener('click', async (e) => {
   setTimeout(() => { b.textContent = label; }, 1500);
 });
 
+// ---------- company PowerPoint template ----------
+// The viewer can pick their company template (.pptx). It stays in this page's memory only (never
+// uploaded or stored). The deck is then built inside that file: its first slide (text swapped), the
+// generated slides on its "SIMPLE PAGE" layout so the logo and brand graphics appear on every slide,
+// and its last slide as the closing page. The template's other slides are dropped.
+let TEMPLATE = null;   // { name, buf }
+const xmlEsc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const xAttr = (tag, name) => (new RegExp('\\s' + name.replace(':', '\\:') + '="([^"]*)"').exec(tag) || [])[1];
+function resolvePart(base, target) {
+  if (target.startsWith('/')) return target.slice(1);
+  const parts = base.split('/'); parts.pop();
+  for (const seg of target.split('/')) { if (seg === '..') parts.pop(); else if (seg && seg !== '.') parts.push(seg); }
+  return parts.join('/');
+}
+const relsPath = (p) => p.replace(/([^/]+)$/, '_rels/$1.rels');
+const relList = (xml) => [...(xml || '').matchAll(/<Relationship\b[^>]*\/?>/g)].map((m) => ({ tag: m[0], id: xAttr(m[0], 'Id'), type: xAttr(m[0], 'Type') || '', target: xAttr(m[0], 'Target'), external: /TargetMode="External"/.test(m[0]) }));
+
+// Replaces the first visible text on the title slide with the deck title, adding smaller lines under it.
+function retitle(xml, lines) {
+  const m = /<a:t>[^<]*\S[^<]*<\/a:t>/.exec(xml);
+  if (!m) return xml;
+  const pStart = xml.lastIndexOf('<a:p>', m.index), pEnd = xml.indexOf('</a:p>', m.index) + 6;
+  if (pStart < 0 || pEnd < 6) return xml;
+  const para = xml.slice(pStart, pEnd);
+  const withText = (p, text) => p.replace(/(<a:r>[\s\S]*?<a:t>)[^<]*(<\/a:t>[\s\S]*?<\/a:r>)/, `$1${xmlEsc(text)}$2`).replace(/(<\/a:r>)[\s\S]*?(<a:endParaRPr|<\/a:p>)/, '$1$2');
+  const small = (p, sz) => p.replace(/<a:lnSpc>[\s\S]*?<\/a:lnSpc>/, '<a:lnSpc><a:spcPct val="100000"/></a:lnSpc>')
+    .replace(/<a:spcBef>[\s\S]*?<\/a:spcBef>/, '<a:spcBef><a:spcPts val="600"/></a:spcBef>')
+    .replace(/<a:rPr\b([^>]*?)(\/?)>/, (t, attrs, close) => `<a:rPr${attrs.replace(/\ssz="\d+"/, '')} sz="${sz}"${close}>`)
+    .replace(/<a:endParaRPr\b([^>]*?)(\/?)>/, (t, attrs, close) => `<a:endParaRPr${attrs.replace(/\ssz="\d+"/, '')} sz="${sz}"${close}>`);
+  const out = [withText(para, lines[0]), ...lines.slice(1).map((l, i) => small(withText(para, l), i === 0 ? 2000 : 1400))].join('');
+  return xml.slice(0, pStart) + out + xml.slice(pEnd);
+}
+
+async function mergeIntoTemplate(JSZip, tplBuf, genBuf, titleLines) {
+  const T = await JSZip.loadAsync(tplBuf), G = await JSZip.loadAsync(genBuf);
+  const read = (z, p) => (z.file(p) ? z.file(p).async('string') : Promise.resolve(null));
+  let ct = await read(T, '[Content_Types].xml'), pres = await read(T, 'ppt/presentation.xml'), presRels = await read(T, 'ppt/_rels/presentation.xml.rels');
+  if (!ct || !pres || !presRels) throw new Error('That file is not a PowerPoint (.pptx) template.');
+  const pRels = relList(presRels), sld = [...pres.matchAll(/<p:sldId\b[^>]*\/>/g)].map((m) => ({ tag: m[0], id: +xAttr(m[0], 'id'), rid: xAttr(m[0], 'r:id') }));
+  if (sld.length < 2) throw new Error('The template needs at least a first and a last slide.');
+  const partOf = (rid) => resolvePart('ppt/presentation.xml', pRels.find((r) => r.id === rid).target);
+  const firstPart = partOf(sld[0].rid), lastPart = partOf(sld[sld.length - 1].rid);
+
+  // content layout: "SIMPLE PAGE" if the template has one, otherwise the layout of its second slide
+  let layout = null;
+  for (const f of Object.keys(T.files).filter((f) => /^ppt\/slideLayouts\/slideLayout\d+\.xml$/.test(f)).sort((a, b) => +a.match(/\d+/)[0] - +b.match(/\d+/)[0])) {
+    if (/<p:cSld name="SIMPLE PAGE"/i.test(await read(T, f))) { layout = f; break; }
+  }
+  if (!layout) {
+    const r = relList(await read(T, relsPath(partOf(sld[Math.min(1, sld.length - 1)].rid)))).find((x) => x.type.endsWith('/slideLayout'));
+    layout = resolvePart(partOf(sld[1].rid), r.target);
+  }
+
+  // drop the template's middle slides (and their notes)
+  for (const s of sld.slice(1, -1)) {
+    const part = partOf(s.rid), rels = relList(await read(T, relsPath(part)));
+    for (const r of rels) if (r.type.endsWith('/notesSlide')) { const np = resolvePart(part, r.target); T.remove(np); T.remove(relsPath(np)); ct = ct.replace(new RegExp(`<Override PartName="/${np}"[^>]*/>`), ''); }
+    T.remove(part); T.remove(relsPath(part));
+    ct = ct.replace(new RegExp(`<Override PartName="/${part}"[^>]*/>`), '');
+    presRels = presRels.replace(pRels.find((r) => r.id === s.rid).tag, '');
+  }
+
+  // copy the generated slides (all but the generated title slide) with their charts
+  const gPres = await read(G, 'ppt/presentation.xml'), gRels = relList(await read(G, 'ppt/_rels/presentation.xml.rels'));
+  const gSlides = [...gPres.matchAll(/<p:sldId\b[^>]*\/>/g)].map((m) => resolvePart('ppt/presentation.xml', gRels.find((r) => r.id === xAttr(m[0], 'r:id')).target)).slice(1);
+  let slideNo = Math.max(0, ...Object.keys(T.files).map((f) => +(/^ppt\/slides\/slide(\d+)\.xml$/.exec(f) || [])[1] || 0)) + 1;
+  let chartNo = 1000, maxId = Math.max(...sld.map((s) => s.id)), newIds = '';
+  // Some template layouts carry leftover sample text in plain text boxes (e.g. "CLICK TO CHANGE STYLES OF
+  // MASK TEXT"). Remove those from the chosen layout in the exported copy; placeholders and fields stay.
+  T.file(layout, (await read(T, layout)).replace(/<p:sp>[\s\S]*?<\/p:sp>/g,
+    (sp) => (!sp.includes('<p:ph') && !sp.includes('<a:fld') && /<a:t>[^<]*\S/.test(sp) ? '' : sp)));
+  const layoutTarget = '../slideLayouts/' + layout.split('/').pop();
+  for (const [k, gp] of gSlides.entries()) {
+    const np = `ppt/slides/slide${slideNo++}.xml`;
+    T.file(np, await read(G, gp));
+    let rels = '';
+    for (const r of relList(await read(G, relsPath(gp)))) {
+      if (r.type.endsWith('/notesSlide')) continue;
+      if (r.type.endsWith('/slideLayout')) { rels += `<Relationship Id="${r.id}" Type="${r.type}" Target="${layoutTarget}"/>`; continue; }
+      if (r.type.endsWith('/chart')) {
+        const src = resolvePart(gp, r.target), cn = `ppt/charts/chart${chartNo++}.xml`;
+        T.file(cn, await read(G, src));
+        let crels = '';
+        for (const cr of relList(await read(G, relsPath(src)))) {
+          const esrc = resolvePart(src, cr.target), edst = `ppt/embeddings/otp_${cn.match(/\d+/)[0]}_${esrc.split('/').pop()}`;
+          T.file(edst, await G.file(esrc).async('uint8array'));
+          crels += `<Relationship Id="${cr.id}" Type="${cr.type}" Target="../embeddings/${edst.split('/').pop()}"/>`;
+        }
+        T.file(relsPath(cn), `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${crels}</Relationships>`);
+        ct = ct.replace('</Types>', `<Override PartName="/${cn}" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/></Types>`);
+        rels += `<Relationship Id="${r.id}" Type="${r.type}" Target="/${cn}"/>`;
+        continue;
+      }
+      if (!r.external) {   // images or other media
+        const src = resolvePart(gp, r.target), dst = `ppt/media/otp_${slideNo}_${src.split('/').pop()}`;
+        T.file(dst, await G.file(src).async('uint8array'));
+        rels += `<Relationship Id="${r.id}" Type="${r.type}" Target="../media/${dst.split('/').pop()}"/>`;
+      } else rels += r.tag;
+    }
+    T.file(relsPath(np), `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${rels}</Relationships>`);
+    ct = ct.replace('</Types>', `<Override PartName="/${np}" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/></Types>`);
+    const rid = `rIdOtp${k + 1}`;
+    presRels = presRels.replace('</Relationships>', `<Relationship Id="${rid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="${np.replace('ppt/', '')}"/></Relationships>`);
+    newIds += `<p:sldId id="${++maxId}" r:id="${rid}"/>`;
+  }
+  if (!/Extension="xlsx"/i.test(ct)) ct = ct.replace('<Default ', '<Default Extension="xlsx" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"/><Default ');
+  pres = pres.replace(/<p:sldIdLst>[\s\S]*?<\/p:sldIdLst>/, `<p:sldIdLst>${sld[0].tag}${newIds}${sld[sld.length - 1].tag}</p:sldIdLst>`);
+  T.file('ppt/presentation.xml', pres); T.file('ppt/_rels/presentation.xml.rels', presRels); T.file('[Content_Types].xml', ct);
+
+  // title slide text
+  T.file(firstPart, retitle(await read(T, firstPart), titleLines));
+
+  // remove media nothing refers to any more (the dropped slides' icons)
+  const used = new Set();
+  for (const f of Object.keys(T.files).filter((f) => f.endsWith('.rels'))) {
+    const owner = f.replace(/_rels\/([^/]+)\.rels$/, '$1');
+    for (const r of relList(await read(T, f))) if (!r.external && r.target) used.add(resolvePart(owner, r.target));
+  }
+  for (const f of Object.keys(T.files)) if (/^ppt\/media\//.test(f) && !T.files[f].dir && !used.has(f)) T.remove(f);
+  const app = await read(T, 'docProps/app.xml');
+  if (app) T.file('docProps/app.xml', app.replace(/<Slides>\d+<\/Slides>/, `<Slides>${gSlides.length + 2}</Slides>`));
+  void lastPart;
+  return T.generateAsync({ type: 'blob', mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', compression: 'DEFLATE' });
+}
+
+function downloadBlob(blob, name) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+function showTemplate() {
+  $('#tplLabel').textContent = TEMPLATE ? `Template: ${TEMPLATE.name.replace(/\.pptx$/i, '').slice(0, 28)}${TEMPLATE.name.length > 32 ? '…' : ''}` : 'Use company template…';
+  $('#tplLabel').title = TEMPLATE ? `${TEMPLATE.name} — used for Export to PowerPoint. Click to choose another.` : 'Choose your company PowerPoint template (.pptx). It stays on this computer.';
+  $('#tplClear').hidden = !TEMPLATE;
+}
+$('#tplInput').addEventListener('change', async (e) => {
+  const f = e.target.files[0]; e.target.value = '';
+  if (!f) return;
+  if (!/\.pptx$/i.test(f.name)) { $('#notice').hidden = false; $('#notice').textContent = 'Choose a PowerPoint template saved as .pptx.'; return; }
+  TEMPLATE = { name: f.name, buf: await f.arrayBuffer() };
+  showTemplate();
+});
+$('#tplClear').addEventListener('click', () => { TEMPLATE = null; showTemplate(); });
+
 // ---------- export to PowerPoint ----------
 // Builds a board-ready deck from the current filters in a strategy-consulting style: full-sentence
 // action titles, an executive summary, numbered exhibits with source lines, a navy/blue palette with
@@ -985,7 +1130,7 @@ document.addEventListener('click', async (e) => {
 // only loaded when someone exports.
 // Colors follow the CEVA Logistics brand: navy #1C2546 and red #E30613. "blue" is the accent/highlight
 // slot (CEVA red); "cyan" is the secondary series (a slate tint of the navy).
-const PPT = { navy: '1C2546', blue: 'E30613', cyan: '7180AE', ink: '1A1A1A', body: '333333', muted: '6F7385', gray: 'B9BCC8', light: 'E4E6ED', pale: 'F3F4F8',
+let PPT = { navy: '1C2546', blue: 'E30613', cyan: '7180AE', ink: '1A1A1A', body: '333333', muted: '6F7385', gray: 'B9BCC8', light: 'E4E6ED', pale: 'F3F4F8',
   red: 'E30613', green: '00875A', serif: 'Georgia', sans: 'Arial' };
 let pptLoading = null;
 function loadPpt() {
@@ -1031,8 +1176,10 @@ function deckData() {
   };
 }
 async function exportPpt() {
-  const btn = $('#pptBtn'), label = btn.textContent;
+  const btn = $('#pptBtn'), label = btn.textContent, basePPT = PPT;
   btn.disabled = true; btn.textContent = 'Preparing…';
+  // With a company template, follow its theme: navy #051038, red #FF0000, Arial throughout.
+  if (TEMPLATE) PPT = { ...basePPT, navy: '051038', blue: 'FF0000', red: 'FF0000', serif: 'Arial' };
   try {
     const PptxGenJS = await loadPpt(), pres = new PptxGenJS();
     pres.layout = 'LAYOUT_WIDE'; pres.title = 'On-time performance review';
@@ -1047,8 +1194,9 @@ async function exportPpt() {
     const slide = (tracker, title, note) => {
       const s = pres.addSlide(); page++;
       s.background = { color: 'FFFFFF' };
-      s.addText(tracker.toUpperCase(), { ...sans, x: M, y: 0.28, w: CW, h: 0.28, fontSize: 9, bold: true, color: PPT.blue, charSpacing: 1.5 });
-      s.addText(title, { ...serif, x: M, y: 0.55, w: CW, h: 0.95, fontSize: 24, valign: 'top', fit: 'shrink' });
+      const TW = TEMPLATE ? CW - 1.9 : CW;   // keep clear of the template's logo, top right
+      s.addText(tracker.toUpperCase(), { ...sans, x: M, y: 0.28, w: TW, h: 0.28, fontSize: 9, bold: true, color: PPT.blue, charSpacing: 1.5 });
+      s.addText(title, { ...serif, x: M, y: 0.55, w: TW, h: 0.95, fontSize: 24, bold: !!TEMPLATE, valign: 'top', fit: 'shrink' });
       s.addShape(pres.ShapeType.line, { x: M, y: 1.55, w: CW, h: 0, line: { color: PPT.navy, width: 1 } });
       s.addText((note ? note + '  ' : '') + source, { ...sans, x: M, y: 6.85, w: CW - 0.8, h: 0.42, fontSize: 8, color: PPT.muted, valign: 'top' });
       s.addText(String(page), { ...sans, x: W - M - 0.6, y: 6.85, w: 0.6, h: 0.3, fontSize: 9, color: PPT.muted, align: 'right' });
@@ -1293,12 +1441,18 @@ async function exportPpt() {
     }
 
     const name = ('OTP review - ' + filt).replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ').slice(0, 150) + '.pptx';
-    await pres.writeFile({ fileName: name });
+    if (TEMPLATE) {
+      btn.textContent = 'Applying template…';
+      const date = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+      const gen = await pres.write({ outputType: 'arraybuffer' });
+      downloadBlob(await mergeIntoTemplate(window.JSZip, TEMPLATE.buf, gen, ['On-time performance review', filt, `Week ${tw.week} review · ${date}`]), name);
+    } else await pres.writeFile({ fileName: name });
     btn.textContent = 'Downloaded';
   } catch (err) {
     btn.textContent = 'Export failed';
     $('#notice').hidden = false; $('#notice').textContent = 'Export to PowerPoint failed: ' + (err && err.message ? err.message : err);
   } finally {
+    PPT = basePPT;
     setTimeout(() => { btn.textContent = label; btn.disabled = false; }, 1800);
   }
 }
