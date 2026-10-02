@@ -983,8 +983,10 @@ document.addEventListener('click', async (e) => {
 // action titles, an executive summary, numbered exhibits with source lines, a navy/blue palette with
 // one highlight color, and native (editable) PowerPoint charts. The library is shared on the bus and
 // only loaded when someone exports.
-const PPT = { navy: '051C2C', blue: '2251FF', cyan: '00A9F4', ink: '1A1A1A', body: '333333', muted: '767676', gray: 'B3B3B3', light: 'E6E6E6', pale: 'F4F6F8',
-  red: 'D0021B', green: '00875A', serif: 'Georgia', sans: 'Arial' };
+// Colors follow the CEVA Logistics brand: navy #1C2546 and red #E30613. "blue" is the accent/highlight
+// slot (CEVA red); "cyan" is the secondary series (a slate tint of the navy).
+const PPT = { navy: '1C2546', blue: 'E30613', cyan: '7180AE', ink: '1A1A1A', body: '333333', muted: '6F7385', gray: 'B9BCC8', light: 'E4E6ED', pale: 'F3F4F8',
+  red: 'E30613', green: '00875A', serif: 'Georgia', sans: 'Arial' };
 let pptLoading = null;
 function loadPpt() {
   if (window.PptxGenJS) return Promise.resolve(window.PptxGenJS);
@@ -1092,12 +1094,12 @@ async function exportPpt() {
     {
       const s = pres.addSlide(); page++;
       s.background = { color: PPT.navy };
-      s.addShape(pres.ShapeType.line, { x: 0.9, y: 2.55, w: 1.2, h: 0, line: { color: PPT.cyan, width: 3 } });
+      s.addShape(pres.ShapeType.line, { x: 0.9, y: 2.55, w: 1.2, h: 0, line: { color: PPT.red, width: 3.5 } });
       s.addText('On-time performance review', { fontFace: PPT.serif, color: 'FFFFFF', x: 0.9, y: 2.75, w: 11, h: 1.0, fontSize: 40 });
-      s.addText(filt, { fontFace: PPT.sans, color: 'D6E4F0', x: 0.9, y: 3.8, w: 11, h: 0.45, fontSize: 16 });
+      s.addText(filt, { fontFace: PPT.sans, color: 'D9DCE8', x: 0.9, y: 3.8, w: 11, h: 0.45, fontSize: 16 });
       s.addText(`Week ${tw.week} review · ${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`,
-        { fontFace: PPT.sans, color: '9FB3C8', x: 0.9, y: 4.3, w: 11, h: 0.4, fontSize: 12 });
-      s.addText('CONFIDENTIAL · INTERNAL USE', { fontFace: PPT.sans, color: '9FB3C8', x: 0.9, y: 6.7, w: 6, h: 0.3, fontSize: 9, charSpacing: 1.5 });
+        { fontFace: PPT.sans, color: 'A9AFC8', x: 0.9, y: 4.3, w: 11, h: 0.4, fontSize: 12 });
+      s.addText('CONFIDENTIAL · INTERNAL USE', { fontFace: PPT.sans, color: 'A9AFC8', x: 0.9, y: 6.7, w: 6, h: 0.3, fontSize: 9, charSpacing: 1.5 });
     }
 
     // 2. executive summary
@@ -1200,7 +1202,7 @@ async function exportPpt() {
         ...byG.map((r) => [cell(r.name, { align: 'left' }), cell(fmtN(r.h)), cell(pctTxt(r.g), { color: r.g < g ? PPT.blue : PPT.body, bold: r.g < g }), cell(pctTxt(r.n, 2), { color: r.n < n ? PPT.red : PPT.body }), cell(fmtN(r.nl))]),
         [cell('Total', { align: 'left', bold: true }), cell(fmtN(t.h), { bold: true }), cell(pctTxt(g), { bold: true }), cell(pctTxt(n, 2), { bold: true }), cell(fmtN(t.nl), { bold: true })]],
         x2, 2.55, [1.8, 1.2, 0.95, 0.95, 1.0], 0.4);
-      s.addText('Blue: gross on-time below the overall average. Red: net on-time below the overall average.', { ...sans, x: x2, y: 6.4, w: CW - 6.2, h: 0.3, fontSize: 9, color: PPT.muted });
+      s.addText('Red: below the overall average for that measure.', { ...sans, x: x2, y: 6.4, w: CW - 6.2, h: 0.3, fontSize: 9, color: PPT.muted });
     }
 
     // 8. root causes
