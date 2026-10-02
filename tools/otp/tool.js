@@ -726,6 +726,19 @@ function fcChart(el, keys, nActual, series, { pct = false, money = false, tip })
   hit.addEventListener('mouseleave', () => { guide.setAttribute('visibility', 'hidden'); hideTip(); });
 }
 
+// Projection numbers for the current filters (used by the Projections tab and the PowerPoint deck).
+function fcCompute(H, N) {
+  const shipT = trimPartial(weekly(DATA.ship, [7])), podT = trimPartial(weekly(DATA.pod, [7, 8, 9, 10]));
+  const ship = shipT.series, pod = podT.series;
+  if (ship.length < 4 || pod.length < 4) return { err: 'Not enough weekly history for these filters. Projections need at least 4 full weeks.' };
+  const sb = ship.slice(-N), pb = pod.slice(-N);
+  const vol = trendProject(sb.map((p) => p.v[0]), H), rev = trendProject(pb.map((p) => p.v[3]), H);
+  const gross = rateProject(pb.map((p) => p.v[0] - p.v[1]), pb.map((p) => p.v[0]), H);
+  const net = rateProject(pb.map((p) => p.v[0] - p.v[2]), pb.map((p) => p.v[0]), H);
+  if (!gross) return { err: 'No delivered shipments in the basis weeks for these filters.' };
+  return { shipT, ship, pod, sb, pb, vol, rev, gross, net };
+}
+
 function projections() {
   const H = S.fcH || 8, N = S.fcBasis || 12, c = T();
   [['#fcHorizon', 'fcH', [4, 8, 12]], ['#fcBasis', 'fcBasis', [8, 12, 26]]].forEach(([sel, key, opts]) => {
@@ -734,14 +747,9 @@ function projections() {
     el.onclick = (e) => { const b = e.target.closest('button'); if (!b) return; S[key] = +b.dataset.v; saveState(); render(); };
   });
   const clear = (msg) => { for (const s of ['#fcTiles', '#fcVol', '#fcOtp', '#fcRev', '#fcTable']) $(s).innerHTML = ''; $('#fcNote').textContent = msg; };
-  const shipT = trimPartial(weekly(DATA.ship, [7])), podT = trimPartial(weekly(DATA.pod, [7, 8, 9, 10]));
-  const ship = shipT.series, pod = podT.series;
-  if (ship.length < 4 || pod.length < 4) { clear('Not enough weekly history for these filters. Projections need at least 4 full weeks.'); return; }
-  const sb = ship.slice(-N), pb = pod.slice(-N);
-  const vol = trendProject(sb.map((p) => p.v[0]), H), rev = trendProject(pb.map((p) => p.v[3]), H);
-  const gross = rateProject(pb.map((p) => p.v[0] - p.v[1]), pb.map((p) => p.v[0]), H);
-  const net = rateProject(pb.map((p) => p.v[0] - p.v[2]), pb.map((p) => p.v[0]), H);
-  if (!gross) { clear('No delivered shipments in the basis weeks for these filters.'); return; }
+  const F = fcCompute(H, N);
+  if (F.err) { clear(F.err); return; }
+  const { shipT, ship, pod, sb, pb, vol, rev, gross, net } = F;
 
   const notes = [`Based on ${sb.length} full ship weeks (week of ${idxLabel(sb[0].k)} to week of ${idxLabel(sb[sb.length - 1].k)}).`];
   if (shipT.dropped) notes.push(`The week of ${idxLabel(shipT.dropped.k)} is left out because it has only ${fmtN(shipT.dropped.v[0])} HAWBs so far, which looks like a partial week.`);
@@ -969,6 +977,261 @@ document.addEventListener('click', async (e) => {
   }
   setTimeout(() => { b.textContent = label; }, 1500);
 });
+
+// ---------- export to PowerPoint ----------
+// Builds a director-ready deck from the current filters with native (editable) PowerPoint charts.
+// The library is shared on the bus and only loaded when someone exports.
+const PPT = { ink: '1D1D1F', muted: '6E6E73', line: 'E3E3E8', tile: 'F5F5F7', blue: '2A78D6', teal: '1BAF7A', orange: 'EB6834', red: 'C9302C', green: '1D8A3A', font: 'Segoe UI' };
+let pptLoading = null;
+function loadPpt() {
+  if (window.PptxGenJS) return Promise.resolve(window.PptxGenJS);
+  if (!pptLoading) {
+    pptLoading = new Promise((ok, fail) => {
+      const s = document.createElement('script');
+      s.src = '/assets/vendor/pptxgen.bundle.js';
+      s.onload = () => ok(window.PptxGenJS);
+      s.onerror = () => { pptLoading = null; fail(new Error('The PowerPoint library could not be loaded. Check your connection and try again.')); };
+      document.head.append(s);
+    });
+  }
+  return pptLoading;
+}
+const pctTxt = (p, d = 1) => (p == null || !isFinite(p) ? '–' : (p * 100).toFixed(d) + '%');
+const ptsTxt = (d) => (d == null || !isFinite(d) ? '' : `${d >= 0 ? '▲' : '▼'} ${Math.abs(d * 100).toFixed(1)} pts`);
+function filterText() {
+  const parts = [S.regions.length === NR ? 'All regions' : S.regions.map((i) => dims.region[i]).join(', ')];
+  if (S.account >= 0) parts.push(dims.account[S.account]);
+  if (S.csr >= 0) parts.push('CSR: ' + dims.csr[S.csr]);
+  if (S.cust >= 0) parts.push(dims.cust[S.cust]);
+  parts.push(S.from === S.to ? ymLabel(S.from) : `${ymLabel(S.from)} – ${ymLabel(S.to)}`);
+  return parts.join(' · ');
+}
+// Everything the deck shows, from the already-filtered aggregates.
+function deckData() {
+  const done = (k) => k < thisWeek().key;                          // leave out the week in progress
+  const podKeys = sortedKeys(A.podW).filter(done), shipKeys = sortedKeys(A.shipW).filter(done);
+  const last = (ks, n) => ks.slice(-n);
+  const rate = (ks, f) => { let h = 0, x = 0; for (const k of ks) { const w = A.podW.get(k); h += w.h; x += w[f]; } return h ? 1 - x / h : null; };
+  const recent = last(podKeys, 4), prior = podKeys.slice(-8, -4);
+  const cust = new Map();
+  for (const r of A.podRows) { let o = cust.get(r[1]); if (!o) cust.set(r[1], (o = { h: 0, gl: 0, nl: 0, reg: r[0] })); o.h += r[7]; o.gl += r[8]; o.nl += r[9]; if (o.reg !== r[0]) o.reg = -1; }
+  const custRows = [...cust.entries()].map(([k, o]) => ({ name: dims.cust[k], reg: o.reg >= 0 ? dims.region[o.reg] : 'Multiple', ...o, g: 1 - o.gl / o.h, n: 1 - o.nl / o.h }));
+  const minVol = Math.max(30, Math.round(A.tot.h * 0.002));
+  return {
+    podKeys: last(podKeys, 13), shipKeys: last(shipKeys, 13),
+    grossRecent: rate(recent, 'gl'), grossPrior: rate(prior, 'gl'), netRecent: rate(recent, 'nl'), netPrior: rate(prior, 'nl'), recent, prior,
+    lowest: custRows.filter((c) => c.h >= minVol).sort((a, b) => a.g - b.g).slice(0, 8), minVol,
+    mostCtrl: custRows.filter((c) => c.nl > 0).sort((a, b) => b.nl - a.nl).slice(0, 8),
+  };
+}
+async function exportPpt() {
+  const btn = $('#pptBtn'), label = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Preparing…';
+  try {
+    const PptxGenJS = await loadPpt(), pres = new PptxGenJS();
+    pres.layout = 'LAYOUT_WIDE'; pres.title = 'On-time performance review'; pres.company = '';
+    const W = 13.333, M = 0.55, D = deckData(), t = A.tot, filt = filterText(), tw = thisWeek();
+    const multi = multiYear([...D.podKeys, ...D.shipKeys]), wl = (k) => wkLabel(k, multi).replace('’', "'");
+    let page = 0;
+    const base = { fontFace: PPT.font, color: PPT.ink };
+    const slide = (title, sub) => {
+      const s = pres.addSlide(); page++;
+      s.background = { color: 'FFFFFF' };
+      s.addText(title, { ...base, x: M, y: 0.35, w: W - 2 * M, h: 0.6, fontSize: 26, bold: true });
+      if (sub) s.addText(sub, { ...base, x: M, y: 0.92, w: W - 2 * M, h: 0.4, fontSize: 13, color: PPT.muted });
+      s.addShape(pres.ShapeType.line, { x: M, y: 7.0, w: W - 2 * M, h: 0, line: { color: PPT.line, width: 0.75 } });
+      s.addText(`OTP Dashboard · ${filt}`, { ...base, x: M, y: 7.02, w: 10, h: 0.32, fontSize: 9, color: PPT.muted });
+      s.addText(String(page), { ...base, x: W - M - 1, y: 7.02, w: 1, h: 0.32, fontSize: 9, color: PPT.muted, align: 'right' });
+      return s;
+    };
+    const axis = { catAxisLabelFontSize: 10, valAxisLabelFontSize: 10, catAxisLabelColor: PPT.muted, valAxisLabelColor: PPT.muted, catAxisLabelFontFace: PPT.font, valAxisLabelFontFace: PPT.font,
+      valGridLine: { color: PPT.line, size: 0.5 }, catGridLine: { style: 'none' }, catAxisLineShow: true, valAxisLineShow: false, legendFontFace: PPT.font, legendFontSize: 11, legendColor: PPT.ink };
+    const cell = (text, o = {}) => ({ text: String(text), options: { fontFace: PPT.font, fontSize: 11, color: PPT.ink, align: 'right', valign: 'middle', ...o } });
+    const head = (cols) => cols.map((c, i) => cell(c, { bold: true, color: PPT.muted, fill: { color: PPT.tile }, align: i ? 'right' : 'left', fontSize: 10 }));
+    const tableOpts = (colW, y = 1.55) => ({ x: M, y, w: colW.reduce((a, b) => a + b, 0), colW, rowH: 0.34, border: { type: 'solid', pt: 0.5, color: PPT.line }, autoPage: false });
+
+    // 1. title
+    {
+      const s = pres.addSlide(); page++;
+      s.background = { color: 'FFFFFF' };
+      s.addShape(pres.ShapeType.rect, { x: 0, y: 0, w: 0.22, h: 7.5, fill: { color: PPT.blue }, line: { color: PPT.blue } });
+      s.addText('On-time performance review', { ...base, x: 0.9, y: 2.2, w: 11.5, h: 1, fontSize: 40, bold: true });
+      s.addText(filt, { ...base, x: 0.9, y: 3.25, w: 11.5, h: 0.5, fontSize: 18, color: PPT.muted });
+      s.addText(`Week ${tw.week} · prepared ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} · data built ${fmtBuilt(DATA.generated)}`,
+        { ...base, x: 0.9, y: 3.85, w: 11.5, h: 0.4, fontSize: 13, color: PPT.muted });
+    }
+
+    // 2. headline numbers
+    {
+      const g = t.h ? 1 - t.gl / t.h : null, n = t.h ? 1 - t.nl / t.h : null;
+      const msg = `Net on-time ${pctTxt(n, 2)} and gross on-time ${pctTxt(g)} on ${fmtN(t.h)} delivered HAWBs; ${fmtN(t.nl)} late shipments were controllable.`;
+      const s = slide('Headline numbers', msg);
+      const dG = D.grossRecent != null && D.grossPrior != null ? D.grossRecent - D.grossPrior : null;
+      const dN = D.netRecent != null && D.netPrior != null ? D.netRecent - D.netPrior : null;
+      const tiles = [
+        ['On-time net', pctTxt(n, 2), dN == null ? '' : `${ptsTxt(dN)} last 4 weeks vs prior 4`, dN],
+        ['On-time gross', pctTxt(g), dG == null ? '' : `${ptsTxt(dG)} last 4 weeks vs prior 4`, dG],
+        ['Controllable late', fmtN(t.nl), 'late with a controllable delay code', null],
+        ['HAWBs shipped', fmtN(t.shipped), 'by ship date in period', null],
+        ['HAWBs delivered', fmtN(t.h), 'with a POD in period', null],
+        ['Revenue', fmt$c(t.rev), 'on delivered HAWBs', null],
+      ];
+      const tw2 = (W - 2 * M - 2 * 0.3) / 3, th = 2.25;
+      tiles.forEach(([lab, val, note, d], i) => {
+        const x = M + (i % 3) * (tw2 + 0.3), y = 1.65 + Math.floor(i / 3) * (th + 0.3);
+        s.addShape(pres.ShapeType.roundRect, { x, y, w: tw2, h: th, fill: { color: PPT.tile }, line: { color: PPT.tile }, rectRadius: 0.12 });
+        s.addText(lab.toUpperCase(), { ...base, x: x + 0.3, y: y + 0.25, w: tw2 - 0.6, h: 0.35, fontSize: 12, bold: true, color: PPT.muted, charSpacing: 1 });
+        s.addText(val, { ...base, x: x + 0.3, y: y + 0.65, w: tw2 - 0.6, h: 0.9, fontSize: 40, bold: true });
+        s.addText(note, { ...base, x: x + 0.3, y: y + 1.6, w: tw2 - 0.6, h: 0.4, fontSize: 12, color: d == null ? PPT.muted : d >= 0 ? PPT.green : PPT.red });
+      });
+    }
+
+    // 3. OTP trend
+    if (D.podKeys.length >= 2) {
+      const labels = D.podKeys.map(wl), gross = D.podKeys.map((k) => { const w = A.podW.get(k); return 1 - w.gl / w.h; }), net = D.podKeys.map((k) => { const w = A.podW.get(k); return 1 - w.nl / w.h; });
+      const s = slide('On-time trend', `Gross and net on-time % by POD week, last ${labels.length} full weeks (${labels[0]} – ${labels[labels.length - 1]})`);
+      s.addChart(pres.ChartType.line, [{ name: 'Gross on-time %', labels, values: gross }, { name: 'Net on-time %', labels, values: net }], {
+        x: M, y: 1.5, w: W - 2 * M, h: 5.3, ...axis, chartColors: [PPT.blue, PPT.teal], lineSize: 3, lineDataSymbol: 'circle', lineDataSymbolSize: 7,
+        valAxisMinVal: 0, valAxisMaxVal: 1, valAxisMajorUnit: 0.25, valAxisLabelFormatCode: '0%', showLegend: true, legendPos: 't',
+        showValue: true, dataLabelFormatCode: '0%', dataLabelFontSize: 9, dataLabelColor: PPT.muted, dataLabelPosition: 't' });
+
+      // 4. net close-up
+      const lo = Math.min(...net), min = Math.max(0, Math.floor((lo - 0.002) * 200) / 200);
+      const s2 = slide('Net on-time close-up', `Net on-time % by POD week on a tight scale (${pctTxt(min)} – 100%), so week-to-week changes are visible`);
+      s2.addChart(pres.ChartType.line, [{ name: 'Net on-time %', labels, values: net }], {
+        x: M, y: 1.5, w: W - 2 * M, h: 5.3, ...axis, chartColors: [PPT.teal], lineSize: 3, lineDataSymbol: 'circle', lineDataSymbolSize: 7,
+        valAxisMinVal: min, valAxisMaxVal: 1, valAxisLabelFormatCode: '0.0%', showLegend: false,
+        showValue: true, dataLabelFormatCode: '0.00%', dataLabelFontSize: 10, dataLabelColor: PPT.ink, dataLabelPosition: 't' });
+    }
+
+    // 5. volume
+    if (D.shipKeys.length) {
+      const labels = D.shipKeys.map(wl), vals = D.shipKeys.map((k) => A.shipW.get(k));
+      const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+      const s = slide('Shipment volume', `HAWBs shipped per week, last ${labels.length} full weeks · average ${fmtN(avg)} a week`);
+      s.addChart(pres.ChartType.bar, [{ name: 'HAWBs shipped', labels, values: vals }], {
+        x: M, y: 1.5, w: W - 2 * M, h: 5.3, ...axis, barDir: 'col', barGapWidthPct: 55, chartColors: [PPT.blue], showLegend: false,
+        valAxisLabelFormatCode: '#,##0', showValue: true, dataLabelFormatCode: '#,##0', dataLabelFontSize: 9, dataLabelColor: PPT.muted, dataLabelPosition: 'outEnd' });
+    }
+
+    // 6. by region
+    {
+      const ids = [...new Set([...A.regP.keys(), ...A.regS.keys()])].sort((a, b) => a - b), none = { h: 0, gl: 0, nl: 0, rev: 0 };
+      const row = (name, sh, p, bold) => [cell(name, { align: 'left', bold }), cell(fmtN(sh), { bold }), cell(fmtN(p.h), { bold }), cell(fmt$c(p.rev), { bold }),
+        cell(p.h ? pctTxt(1 - p.gl / p.h) : '–', { bold }), cell(p.h ? pctTxt(1 - p.nl / p.h, 2) : '–', { bold }), cell(fmtN(p.nl), { bold })];
+      const rows = [head(['Region', 'Shipped', 'Delivered', 'Revenue', 'Gross OTP', 'Net OTP', 'Controllable late']),
+        ...ids.map((i) => row(dims.region[i], A.regS.get(i) || 0, A.regP.get(i) || none)), row('Total', t.shipped, t, true)];
+      const s = slide('By region', 'Shipped by ship date, delivered and on-time by POD date, in the selected period');
+      s.addTable(rows, tableOpts([3.2, 1.45, 1.45, 1.45, 1.45, 1.45, 1.75]));
+      const withPod = ids.filter((i) => (A.regP.get(i) || none).h);
+      if (withPod.length > 1) {
+        const labels = withPod.map((i) => dims.region[i]), rate = (i, f) => { const p = A.regP.get(i); return 1 - p[f] / p.h; };
+        s.addChart(pres.ChartType.bar, [{ name: 'Gross on-time %', labels, values: withPod.map((i) => rate(i, 'gl')) }, { name: 'Net on-time %', labels, values: withPod.map((i) => rate(i, 'nl')) }], {
+          x: M, y: 1.55 + 0.34 * (ids.length + 2) + 0.25, w: W - 2 * M, h: Math.max(2.2, 6.85 - (1.55 + 0.34 * (ids.length + 2) + 0.25)), ...axis, barDir: 'col', barGapWidthPct: 70,
+          chartColors: [PPT.blue, PPT.teal], valAxisMinVal: 0, valAxisMaxVal: 1, valAxisMajorUnit: 0.25, valAxisLabelFormatCode: '0%', showLegend: true, legendPos: 'r',
+          showValue: true, dataLabelFormatCode: '0.0%', dataLabelFontSize: 9, dataLabelColor: PPT.muted, dataLabelPosition: 'outEnd' });
+      }
+    }
+
+    // 7. delay codes
+    {
+      const items = [...A.delay.entries()].map(([k, v]) => ({ label: dims.delay[k], c: v[0], u: v[1], t: v[0] + v[1] })).sort((a, b) => b.t - a.t);
+      const total = items.reduce((s, x) => s + x.t, 0);
+      if (total) {
+        const top = items.slice(0, 8);
+        if (items.length > 8) { const rest = items.slice(8); top.push({ label: 'Other', c: rest.reduce((s, x) => s + x.c, 0), u: rest.reduce((s, x) => s + x.u, 0) }); }
+        const ctrl = items.reduce((s, x) => s + x.c, 0);
+        const s = slide('Why shipments were late', `${fmtN(total)} late HAWBs · ${pctTxt(ctrl / total)} carried a controllable delay code · top reason: ${items[0].label} (${pctTxt(items[0].t / total)})`);
+        const half = (W - 2 * M - 0.4) / 2;
+        s.addText('All late shipments: top reasons', { ...base, x: M, y: 1.45, w: half, h: 0.35, fontSize: 14, bold: true });
+        const top8 = items.slice(0, 8);
+        s.addChart(pres.ChartType.bar, [{ name: 'Late HAWBs', labels: top8.map((x) => x.label), values: top8.map((x) => x.t / total) }], {
+          x: M, y: 1.85, w: half, h: 4.6, ...axis, barDir: 'bar', barGapWidthPct: 45, chartColors: [PPT.blue], catAxisOrientation: 'maxMin', showLegend: false,
+          valAxisHidden: true, valGridLine: { style: 'none' }, catAxisLabelFontSize: 10, showValue: true, dataLabelFormatCode: '0%', dataLabelFontSize: 10, dataLabelColor: PPT.ink, dataLabelPosition: 'outEnd' });
+        const ctrlItems = items.filter((x) => x.c > 0).sort((a, b) => b.c - a.c).slice(0, 8), x2 = M + half + 0.4;
+        s.addText(`Controllable late (${fmtN(ctrl)}): reasons`, { ...base, x: x2, y: 1.45, w: half, h: 0.35, fontSize: 14, bold: true });
+        if (ctrlItems.length) s.addChart(pres.ChartType.bar, [{ name: 'Controllable late', labels: ctrlItems.map((x) => x.label), values: ctrlItems.map((x) => x.c) }], {
+          x: x2, y: 1.85, w: half, h: 4.6, ...axis, barDir: 'bar', barGapWidthPct: 45, chartColors: [PPT.orange], catAxisOrientation: 'maxMin', showLegend: false,
+          valAxisHidden: true, valGridLine: { style: 'none' }, catAxisLabelFontSize: 10, showValue: true, dataLabelFormatCode: '#,##0', dataLabelFontSize: 10, dataLabelColor: PPT.ink, dataLabelPosition: 'outEnd' });
+        const missing = items.find((x) => /missing delay code/i.test(x.label));
+        if (missing) s.addText(`Data gap: ${fmtN(missing.t)} late HAWBs (${pctTxt(missing.t / total)}) have no delay code, so they cannot be classed as controllable or not.`,
+          { ...base, x: M, y: 6.5, w: W - 2 * M, h: 0.4, fontSize: 12, color: PPT.red });
+      }
+    }
+
+    // 8. where to act
+    if (D.lowest.length || D.mostCtrl.length) {
+      const s = slide('Where to act', `Customers with the lowest gross on-time (at least ${fmtN(D.minVol)} delivered) and the most controllable late shipments`);
+      const colW = [3.0, 1.0, 1.0, 1.0];
+      s.addText('Lowest gross on-time', { ...base, x: M, y: 1.45, w: 5.6, h: 0.35, fontSize: 14, bold: true });
+      s.addTable([head(['Customer', 'Delivered', 'Gross', 'Net']), ...D.lowest.map((c) => [cell(c.name, { align: 'left', fontSize: 10 }), cell(fmtN(c.h), { fontSize: 10 }),
+        cell(pctTxt(c.g), { fontSize: 10, bold: true, color: PPT.red }), cell(pctTxt(c.n, 2), { fontSize: 10 })])], { ...tableOpts(colW, 1.85), rowH: 0.5 });
+      const x2 = M + 6.2;
+      s.addText('Most controllable late', { ...base, x: x2, y: 1.45, w: 5.6, h: 0.35, fontSize: 14, bold: true });
+      s.addTable([head(['Customer', 'Delivered', 'Ctrl. late', 'Net']), ...D.mostCtrl.map((c) => [cell(c.name, { align: 'left', fontSize: 10 }), cell(fmtN(c.h), { fontSize: 10 }),
+        cell(fmtN(c.nl), { fontSize: 10, bold: true, color: PPT.orange }), cell(pctTxt(c.n, 2), { fontSize: 10 })])], { ...tableOpts(colW, 1.85), x: x2, rowH: 0.5 });
+    }
+
+    // 9. CSR summary
+    {
+      const ship = csrShipRows(), m = new Map();
+      const get = (k) => { let o = m.get(k); if (!o) m.set(k, (o = { s: 0, h: 0, gl: 0, nl: 0 })); return o; };
+      for (const r of ship.rows) get(r[3]).s += r[7];
+      for (const r of A.podRows) { const o = get(r[3]); o.h += r[7]; o.gl += r[8]; o.nl += r[9]; }
+      const keys = [...m.keys()].sort((a, b) => m.get(b).s - m.get(a).s);
+      if (keys.length) {
+        const shown = keys.slice(0, 14);
+        const s = slide('CSR summary', `${S.csrVol === 'adj' ? 'Adjusted shipment volume (Jesus Quiroga ⅓ → Mindy Wilson for COSTCO+)' : 'Raw shipment volume'} · by volume${keys.length > shown.length ? ` · top ${shown.length} of ${keys.length}` : ''}`);
+        s.addTable([head(['CSR', 'Shipped', 'Delivered', 'Gross OTP', 'Net OTP', 'Controllable late']),
+          ...shown.map((k) => { const o = m.get(k); return [cell(dims.csr[k], { align: 'left', fontSize: 10 }), cell(fmtN(o.s), { fontSize: 10 }), cell(fmtN(o.h), { fontSize: 10 }),
+            cell(o.h ? pctTxt(1 - o.gl / o.h) : '–', { fontSize: 10 }), cell(o.h ? pctTxt(1 - o.nl / o.h, 2) : '–', { fontSize: 10 }), cell(fmtN(o.nl), { fontSize: 10 })]; })],
+          { ...tableOpts([3.6, 1.6, 1.6, 1.6, 1.6, 2.0]), rowH: 0.3 });
+      }
+    }
+
+    // 10. outlook (next 4 weeks from the last 12 full weeks)
+    {
+      const F = fcCompute(4, 12);
+      if (!F.err) {
+        const hist = F.ship.slice(-8), lastK = hist[hist.length - 1].k;
+        const labels = [...hist.map((p) => idxLabel(p.k)), ...F.vol.out.map((_, h) => idxLabel(lastK + h + 1))];
+        const actual = [...hist.map((p) => p.v[0]), ...F.vol.out.map(() => null)], proj = [...hist.map(() => null), ...F.vol.out.map((p) => Math.round(p.mid))];
+        const s = slide('Outlook: next 4 weeks', `Projection from the last ${F.sb.length} full weeks · gross on-time about ${pctTxt(F.gross[0].mid)}, net about ${pctTxt(F.net[0].mid, 2)} · a guide, not a commitment`);
+        s.addChart(pres.ChartType.bar, [{ name: 'Actual HAWBs shipped', labels, values: actual }, { name: 'Projected', labels, values: proj }], {
+          x: M, y: 1.5, w: 7.3, h: 5.2, ...axis, barDir: 'col', barGrouping: 'clustered', barGapWidthPct: 40, barOverlapPct: 100, chartColors: [PPT.blue, 'A9C9F0'], valAxisMinVal: 0,
+          valAxisLabelFormatCode: '#,##0', showLegend: true, legendPos: 't', catAxisLabelFontSize: 9 });
+        const colW = [1.25, 2.0, 1.3];
+        s.addTable([head(['Week of', 'HAWBs (likely range)', 'Gross / Net']),
+          ...F.vol.out.map((p, h) => [cell(idxLabel(lastK + h + 1), { align: 'left', fontSize: 10 }), cell(`${fmtN(p.mid)}\n${fmtN(p.lo)} – ${fmtN(p.hi)}`, { fontSize: 10 }),
+            cell(`${pctTxt(F.gross[h].mid)}\n${pctTxt(F.net[h].mid, 2)}`, { fontSize: 10 })])], { ...tableOpts(colW, 1.7), x: M + 7.6, rowH: 0.62 });
+      }
+    }
+
+    // 11. notes
+    {
+      const s = slide('Definitions and notes');
+      const bullets = [
+        'Gross on-time: delivered on or before the adjusted due date (ship date + SLA workdays, +1 per origin/destination zone outside A–E, excluding holidays).',
+        'Net on-time: a late shipment only counts against it when its delay code is Controllable.',
+        'Weeks start Monday (Excel WEEKNUM type 2). COSTCO+ and AMAZON use ISO weeks, so Dec 29 – Jan 4 is week 1 for them.',
+        `The week in progress (week ${tw.week}) is left out of the weekly charts.`,
+        'CSR volume can be adjusted: Jesus Quiroga keeps 2/3 of his COSTCO+ shipments and 1/3 is credited to Mindy Wilson.',
+        `Data built ${fmtBuilt(DATA.generated)} from ${(DATA.sources || []).join(', ')}.`,
+      ];
+      s.addText(bullets.map((b) => ({ text: b, options: { bullet: true, breakLine: true } })), { ...base, x: M, y: 1.3, w: W - 2 * M, h: 5.4, fontSize: 15, valign: 'top', paraSpaceAfter: 10 });
+    }
+
+    const name = ('OTP review - ' + filt).replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ').slice(0, 150) + '.pptx';
+    await pres.writeFile({ fileName: name });
+    btn.textContent = 'Downloaded';
+  } catch (err) {
+    btn.textContent = 'Export failed';
+    $('#notice').hidden = false; $('#notice').textContent = 'Export to PowerPoint failed: ' + (err && err.message ? err.message : err);
+  } finally {
+    setTimeout(() => { btn.textContent = label; btn.disabled = false; }, 1800);
+  }
+}
+$('#pptBtn').addEventListener('click', () => { if (A) return exportPpt(); });
 
 // ---------- render ----------
 function renderThisWeek() {

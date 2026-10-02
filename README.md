@@ -10,7 +10,7 @@ what it needs without touching the others.
                 │ core/shell.js  shared nav bar + footer                           │
                 │ core/*.js      registry loader, tiles, icons, helpers            │
                 │ tools.json     the list of tools (one entry per tool)            │
-                │ vendor/        shared libraries (SheetJS for Excel export)       │
+                │ vendor/        shared libraries (SheetJS, PptxGenJS for exports) │
                 └─────┬──────────────┬──────────────┬──────────────┬──────────────┘
                       │              │              │              │
                  index.html     tools/sla/     tools/otp/      tools/<new>/
