@@ -4,6 +4,7 @@ __pycache__/
 # OTP Dashboard data files (shipment data) - opened in the browser, never published
 otp_dashboard_data*.json
 OTP_Web_Dashboard.html
-# Company PowerPoint templates are chosen in the browser, never published
+# PowerPoint files stay out of the repo, except the built-in company template for the OTP deck
 *.pptx
 *.potx
+!tools/otp/template/CEVA_template.pptx

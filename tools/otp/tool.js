@@ -979,11 +979,19 @@ document.addEventListener('click', async (e) => {
 });
 
 // ---------- company PowerPoint template ----------
-// The viewer can pick their company template (.pptx). It stays in this page's memory only (never
-// uploaded or stored). The deck is then built inside that file: its first slide (text swapped), the
-// generated slides on its "SIMPLE PAGE" layout so the logo and brand graphics appear on every slide,
-// and its last slide as the closing page. The template's other slides are dropped.
-let TEMPLATE = null;   // { name, buf }
+// Every PowerPoint export is built inside the CEVA template in template/: its first slide (text swapped), the generated slides on its
+// "SIMPLE PAGE" layout so the logo and brand graphics appear on every slide, and its last slide as the
+// closing page. The template's other slides are dropped.
+const DEFAULT_TEMPLATE = { name: 'CEVA template', url: new URL('template/CEVA_template.pptx', import.meta.url).href, builtIn: true };
+const TEMPLATE = { ...DEFAULT_TEMPLATE };   // fetched once, on the first export
+async function templateBytes(tpl) {
+  if (!tpl.buf) {
+    const res = await fetch(tpl.url);
+    if (!res.ok) throw new Error('The built-in CEVA template could not be loaded. Check your connection, or choose a template file.');
+    tpl.buf = await res.arrayBuffer();
+  }
+  return tpl.buf;
+}
 const xmlEsc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const xAttr = (tag, name) => (new RegExp('\\s' + name.replace(':', '\\:') + '="([^"]*)"').exec(tag) || [])[1];
 function resolvePart(base, target) {
@@ -1109,20 +1117,6 @@ function downloadBlob(blob, name) {
   document.body.append(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 4000);
 }
-function showTemplate() {
-  $('#tplLabel').textContent = TEMPLATE ? `Template: ${TEMPLATE.name.replace(/\.pptx$/i, '').slice(0, 28)}${TEMPLATE.name.length > 32 ? '…' : ''}` : 'Use company template…';
-  $('#tplLabel').title = TEMPLATE ? `${TEMPLATE.name} — used for Export to PowerPoint. Click to choose another.` : 'Choose your company PowerPoint template (.pptx). It stays on this computer.';
-  $('#tplClear').hidden = !TEMPLATE;
-}
-$('#tplInput').addEventListener('change', async (e) => {
-  const f = e.target.files[0]; e.target.value = '';
-  if (!f) return;
-  if (!/\.pptx$/i.test(f.name)) { $('#notice').hidden = false; $('#notice').textContent = 'Choose a PowerPoint template saved as .pptx.'; return; }
-  TEMPLATE = { name: f.name, buf: await f.arrayBuffer() };
-  showTemplate();
-});
-$('#tplClear').addEventListener('click', () => { TEMPLATE = null; showTemplate(); });
-
 // ---------- export to PowerPoint ----------
 // Builds a board-ready deck from the current filters in a strategy-consulting style: full-sentence
 // action titles, an executive summary, numbered exhibits with source lines, a navy/blue palette with
@@ -1445,7 +1439,7 @@ async function exportPpt() {
       btn.textContent = 'Applying template…';
       const date = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
       const gen = await pres.write({ outputType: 'arraybuffer' });
-      downloadBlob(await mergeIntoTemplate(window.JSZip, TEMPLATE.buf, gen, ['On-time performance review', filt, `Week ${tw.week} review · ${date}`]), name);
+      downloadBlob(await mergeIntoTemplate(window.JSZip, await templateBytes(TEMPLATE), gen, ['On-time performance review', filt, `Week ${tw.week} review · ${date}`]), name);
     } else await pres.writeFile({ fileName: name });
     btn.textContent = 'Downloaded';
   } catch (err) {
