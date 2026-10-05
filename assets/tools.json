@@ -24,11 +24,11 @@
       "standalone": true
     },
     {
-      "id": "tool-4",
-      "name": "Tool 4",
-      "blurb": "A new tool is on the way.",
-      "status": "soon",
-      "icon": "plus"
+      "id": "emails-received",
+      "name": "Emails Received",
+      "blurb": "Customer emails by day",
+      "status": "live",
+      "icon": "chart"
     },
     {
       "id": "tool-5",
