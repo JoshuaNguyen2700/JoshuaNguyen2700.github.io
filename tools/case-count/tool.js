@@ -93,7 +93,13 @@ function load(data) {
   if (miss.length) notes.push(`No ${miss.map((k) => KN[k]).join(', ')} report was found, so those figures are blank.`);
   if (skipped.length) notes.push(`Skipped: ${skipped.map((f) => `${f.name.split('/').pop()} (${f.note})`).join(', ')}.`);
   if (notes.length) { $('#notice').hidden = false; $('#notice').textContent = notes.join(' '); }
-  buildLayout(); buildFilters(); buildTabs(); show('app'); setTab(S.tab);
+  buildLayout();
+  if (L.fromBook) {
+    const missing = L.sections.flatMap((s) => s.rows.filter((r) => r.p < 0).map((r) => `${r.label} (${s.name})`));
+    if (missing.length) notes.push(`${missing.length === 1 ? 'This name' : 'These names'} from the workbook ${missing.length === 1 ? "isn't" : "aren't"} in the loaded reports, so ${missing.length === 1 ? 'its rows are' : 'their rows are'} empty: ${missing.join(', ')}. If they work another team's cases, load that team's folder too (choose the whole Cview Report folder to load every team).`);
+    if (notes.length) { $('#notice').hidden = false; $('#notice').textContent = notes.join(' '); }
+  }
+  buildFilters(); buildTabs(); show('app'); setTab(S.tab);
 }
 
 // ---------- screens + loading ----------
@@ -207,7 +213,7 @@ function buildLayout() {
   if (L.fromBook) {
     const all = D.people.map((_, i) => i);
     for (const s of T.sections) {
-      const rows = s.labels.map((label) => ({ key: s.name + '|' + label, label, p: -1, how: 'Not found' }));
+      const rows = s.labels.map((label) => ({ key: s.name + '|' + label, label, p: -1, how: 'Not in the loaded files' }));
       const used = new Set();
       // 1. fixes from the Names tab or a ROSTER tab, 2. the name, 3. the numbers
       for (const r of rows) {
@@ -234,6 +240,16 @@ function buildLayout() {
         if (best) { r.p = best[0]; r.how = 'Numbers match'; used.add(best[0]); }
       }
       L.sections.push({ name: s.name, rows });
+    }
+    // One person fills one row. If a name matched the same person in two sections (two PATRICIAs, with
+    // only one of them in the loaded files), the row whose own numbers fit that person best keeps them.
+    const claims = new Map();
+    for (const s of L.sections) for (const r of s.rows) if (r.p >= 0 && !OVR.has(r.key) && r.how !== 'ROSTER tab') { if (!claims.has(r.p)) claims.set(r.p, []); claims.get(r.p).push(r); }
+    for (const rs of claims.values()) {
+      if (rs.length < 2) continue;
+      const score = (r) => { const f = fit(r.key, r.p); return f == null ? Infinity : f; };
+      const keep = rs.reduce((a, b) => (score(b) < score(a) ? b : a));
+      for (const r of rs) if (r !== keep) { r.p = -1; r.how = 'Not in the loaded files'; }
     }
     const findRow = (sec, label) => { const s = L.sections.find((x) => !sec || x.name === sec); const pool = s ? [s] : L.sections; for (const x of pool) { const r = x.rows.find((y) => labelEq(y.label, label)); if (r) return r; } return null; };
     const anyRow = (label) => { for (const s of L.sections) { const r = s.rows.find((y) => labelEq(y.label, label)); if (r) return r; } return null; };
