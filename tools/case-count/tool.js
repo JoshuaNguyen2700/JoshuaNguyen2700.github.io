@@ -164,7 +164,7 @@ document.addEventListener('drop', (e) => {
 });
 
 // ---------- matching workbook names to Salesforce ----------
-// Common nicknames, so BECKY finds Rebecca, PAT finds Patricia and BOB finds Robert.
+// Common nicknames, so a short form finds the full name.
 const NICK = [['REBECCA', 'BECKY', 'BECCA'], ['ROBERT', 'BOB', 'ROB', 'BOBBY'], ['PATRICIA', 'PAT', 'PATTY', 'TRISH'], ['RAYMOND', 'RAY'],
   ['WILLIAM', 'BILL', 'WILL', 'BILLY'], ['ELIZABETH', 'LIZ', 'BETH', 'LIZZY'], ['KATHERINE', 'KATHRINE', 'KATHRYN', 'KATE', 'KATIE', 'KATHY'],
   ['SAMANTHA', 'SAM'], ['SAMUEL', 'SAM'], ['MICHAEL', 'MIKE'], ['JAMES', 'JIM', 'JIMMY'], ['THOMAS', 'TOM'], ['DANIEL', 'DAN', 'DANNY'],
@@ -177,13 +177,13 @@ const NICK = [['REBECCA', 'BECKY', 'BECCA'], ['ROBERT', 'BOB', 'ROB', 'BOBBY'], 
 const toks = (s) => String(s).toUpperCase().split(/[^A-Z0-9]+/).filter(Boolean);
 const nickOf = (w) => { const out = new Set([w]); for (const g of NICK) if (g.includes(w)) g.forEach((x) => out.add(x)); return out; };
 const wordEq = (a, b) => a === b || (a.length >= 3 && b.startsWith(a)) || nickOf(a).has(b);
-// every word of the workbook name matches a word of the Salesforce name ("ADRIANA" -> "Beatriz Adriana Ochoa")
+// every word of the workbook name matches a word of the Salesforce name (a first or middle name)
 const nameHit = (label, name) => { const l = toks(label), n = toks(name); return l.length > 0 && l.every((w) => n.some((t) => wordEq(w, t))); };
-// workbook names that mean the same person ("Pat" on WEEKLY SLA = "PATRICIA" on the month tab)
+// workbook names that mean the same person (a short form on WEEKLY SLA = the full name on the month tab)
 const labelEq = (a, b) => { const x = toks(a).join(' '), y = toks(b).join(' '); return x === y || (x.length >= 3 && y.startsWith(x)) || (y.length >= 3 && x.startsWith(y)) || nickOf(x).has(y); };
 const isWeekday = (d) => { const w = dowOf(d); return w > 0 && w < 6; };
 // How well a person's daily counts fit the workbook's own numbers for that name, on the days both cover
-// (0 = identical). Used when the name alone doesn't decide, e.g. BRENT or SHAY.
+// (0 = identical). Used when the name alone doesn't decide (a nickname not in Salesforce).
 function fit(key, p) {
   const h = D.template && D.template.hist[key]; if (!h) return null;
   const pd = I.pday.get(p); let err = 0, base = 0, n = 0;
@@ -282,15 +282,15 @@ const statusRank = (s) => { const i = STATUS_ORDER.findIndex((x) => sNorm(s).sta
 // "In progress - Follow up needed" on the sheet = "In Progress" in Salesforce
 const statusIds = (label) => D.statuses.map((s, i) => [s, i]).filter(([s]) => { const a = sNorm(s), b = sNorm(label); return a && b && (a.startsWith(b) || b.startsWith(a)); }).map((x) => x[1]);
 
-// Customer rows on CUST E-MAILS use the workbook's own names ("BEACH CAMERA"); they are matched to
+// Customer rows on CUST E-MAILS use the workbook's own customer names; they are matched to
 // Salesforce company names by their words, rare words counting more. A company is counted when most of
-// the row's words and most of the company's own words agree ("FREIGHT CLUB" is Freight Club, not BJ's
-// Wholesale Club). If nothing agrees that well, companies containing every known word of the row, starting
-// with its first word, are used ("LKQ" -> LKQ Corporate Headquarters). The Names tab lists every match.
+// the row's words and most of the company's own words agree (a shared word such as "CLUB" alone is
+// not enough). If nothing agrees that well, companies containing every known word of the row, starting
+// with its first word, are used (a one-word row matching a longer company name). The Names tab lists every match.
 const STOP = new Set(['INC', 'LLC', 'LTD', 'CORP', 'CORPORATION', 'CO', 'COMPANY', 'THE', 'OF', 'AND', 'DBA', 'PARENT', 'HOLDINGS', 'GROUP', 'US', 'USA']);
 let CT = null;
 const ctoks = (s) => toks(s).filter((w) => w.length >= 2 && !STOP.has(w));
-// same word, an abbreviation of it ("HSN" / "HSNI"), a plural ("HOMES" / "HOME") or a one-letter typo ("WALTZ" / "WALTS")
+// same word, an abbreviation of it ("HSN" / "HSNI"), a plural ("HOMES" / "HOME") or a one-letter typo 
 const typo = (a, b) => a.length >= 5 && a.length === b.length && [...a].filter((x, i) => x !== b[i]).length === 1;
 const tokEq = (l, c) => l === c || (l.length >= 3 && c.startsWith(l) && c.length - l.length <= 2) || (c.length >= 4 && l.startsWith(c) && l.length - c.length <= 1) || typo(l, c);
 // Only companies with emails in the rep's own team folder are considered.
@@ -310,7 +310,7 @@ function matchCompanies(label, allowed) {
   const strong = [], loose = [];
   CT.t.forEach((ts, c) => {
     if (allowed && !allowed.has(c)) return;
-    if (joined.length >= 5 && CT.joined[c].includes(joined)) { strong.push(c); return; }   // "SHIP DADDY" = ShipDaddy
+    if (joined.length >= 5 && CT.joined[c].includes(joined)) { strong.push(c); return; }   // two words written as one
     if (!seen.length || !ts.length) return;
     let lm = 0, lt = 0, all = true;
     for (const [w, idf] of seen) { lt += idf; if (ts.some((x) => tokEq(w, x))) lm += idf; else all = false; }
@@ -498,7 +498,7 @@ function about() {
       <li><b>CUST E-MAILS</b>: each customer row counts every email received for the Salesforce companies matched to it (listed below). <b>E-MAILS FROM CEVA STATIONS</b> are emails from @cevalogistics.com addresses on the rep's cases. <b>E-MAILS ACTIONED</b> = the rep's actioned + closed; <b>% ACTIONED</b> = that ÷ TOTAL, goal 85%.</li>
       <li><b>WEEKLY SLA</b>: the average Elapsed Time to first response of the cases opened in the week before each run date (h:mm); TEAM AVERAGE averages the people who had cases.</li>
       <li><b>Open cases</b>: cases in the SLA export whose status isn't Closed.</li>
-      <li>Only weekdays are shown, like the workbook. PTO isn't in Salesforce, so a day off shows 0. Days the exports don't cover are blank. The KASEY ship counts and the EMAIL VS SHIP COUNT and New Cases tabs aren't in these exports.</li>
+      <li>Only weekdays are shown, like the workbook. PTO isn't in Salesforce, so a day off shows 0. Days the exports don't cover are blank. Ship counts and the EMAIL VS SHIP COUNT and New Cases tabs aren't in these exports.</li>
     </ul>`;
   renderTable($('#tFiles'), { cols: [col('File'), col('Team'), col('Report'), col('Rows'), col('Dates')],
     rows: D.files.map((f) => ({ cls: f.kind ? '' : 'muted', c: [cS(f.name), cS(f.team || '–'), cS(f.kind ? (f.kind === 'workbook' ? `${KIND.workbook}: ${f.note}` : KIND[f.kind]) : f.note || 'Skipped'), cN(f.rows), cS(f.from != null ? span(f.from, f.to) + (f.kind === 'sla' ? ' (opened)' : '') : '')] })) });

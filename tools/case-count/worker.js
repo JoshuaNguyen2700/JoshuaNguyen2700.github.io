@@ -73,7 +73,7 @@ const txt = (c) => (c && typeof c.v === 'string' ? c.v.replace(/\s+/g, ' ').trim
 const isNum = (c) => c && typeof c.v === 'number';
 const serialDay = (v) => Math.round(v) - 25569;
 function readTemplate(wb) {
-  // Month tabs ("SEPT 2026"): a section name (GEORGE / KASEY), then CASES ACTIONED and CASES CLOSED
+  // Month tabs ("SEPT 2026"): a section name (the supervisor), then CASES ACTIONED and CASES CLOSED
   // blocks with a date header row and one row per person until TOTALS.
   const months = [];
   for (const name of wb.SheetNames) {
@@ -116,7 +116,7 @@ function readTemplate(wb) {
 
   // CUST E-MAILS (latest tab): a rep name, their customer rows, E-MAILS FROM CEVA STATIONS, TOTAL,
   // E-MAILS ACTIONED (a formula pointing at the rep's rows on the month tab) and % ACTIONED. A row
-  // with dates beside its name (AMAZON MAILBOX) starts a mailbox block.
+  // with dates beside its name starts a mailbox block.
   const custNames = wb.SheetNames.filter((n) => /^CUST\s*E-?MAILS/i.test(n.trim()));
   const cust = [];
   if (custNames.length) {
