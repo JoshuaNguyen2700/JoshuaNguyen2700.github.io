@@ -1,17 +1,20 @@
 // Logic for the case-count tool only. It is an ES module, so nothing here leaks into other pages.
 // The page ships with no case data. The visitor picks the Salesforce report exports (or the folder that
 // holds them); worker.js reads them in the browser and returns small count tables (nothing is uploaded).
-// The reports rebuild the "ACTIONED & CLOSED CASE COUNT" workbook: the monthly CASES ACTIONED / CASES
-// CLOSED tabs, the CUST E-MAILS tabs (% actioned, goal 85%), WEEKLY SLA and Open cases.
+// The page mirrors the "ACTIONED & CLOSED CASE COUNT" workbook tab for tab: a month tab per month
+// (CASES ACTIONED / CASES CLOSED by section), CUST E-MAILS, WEEKLY SLA and Open cases. When that
+// workbook is loaded with the reports, its layout (sections, names, customer rows) is used; the names
+// are matched to Salesforce owners here, and the Names tab shows and corrects each match.
 import { esc } from '/assets/core/util.js';
 
 const $ = (s) => document.querySelector(s);
-const STATE_KEY = 'cc.state';   // tab and view choices only; never data
+const STATE_KEY = 'cc.state';   // the open tab only; never data
 const GOAL = 0.85;
 
 // ---------- dates (whole days since 1970-01-01, as the worker sends them) ----------
 const DAY = 864e5;
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const SHEET_MON = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUNE', 'JULY', 'AUG', 'SEPT', 'OCT', 'NOV', 'DEC'];   // as the workbook names its tabs
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const dt = (d) => new Date(d * DAY);
 const dowOf = (d) => dt(d).getUTCDay();
@@ -22,7 +25,10 @@ const span = (a, b) => (a === b ? dLong(a) : dt(a).getUTCFullYear() === dt(b).ge
 function isoWeek(d) { const th = monday(d) + 3, y = dt(th).getUTCFullYear(); return 1 + Math.floor((th - Date.UTC(y, 0, 1) / DAY) / 7); }
 const toInput = (d) => dt(d).toISOString().slice(0, 10);
 const fromInput = (s) => (/^\d{4}-\d{2}-\d{2}$/.test(s) ? Date.UTC(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice(8, 10)) / DAY : null);
-const today = () => { const n = new Date(); return Date.UTC(n.getFullYear(), n.getMonth(), n.getDate()) / DAY; };
+const monthKey = (d) => dt(d).getUTCFullYear() * 12 + dt(d).getUTCMonth();
+const monthStart = (k) => Date.UTC(Math.floor(k / 12), k % 12, 1) / DAY;
+const monthEnd = (k) => monthStart(k + 1) - 1;
+const sheetName = (k) => `${SHEET_MON[k % 12]} ${Math.floor(k / 12)}`;
 
 // ---------- formatting ----------
 const fmtN = (n) => Math.round(n).toLocaleString('en-US');
@@ -30,19 +36,20 @@ const fmtP = (p, d = 0) => (p == null || !isFinite(p) ? '–' : (p * 100).toFixe
 const fmtHM = (mins) => { if (mins == null || !isFinite(mins)) return '–'; const t = Math.round(mins); return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0'); };
 const plural = (n, w) => `${fmtN(n)} ${w}${n === 1 ? '' : 's'}`;
 const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const byText = (a, b) => String(a).localeCompare(String(b), 'en', { sensitivity: 'base', numeric: true });
 
-// ---------- data + view state ----------
-// D (from worker.js): teams[], people[], companies[], statuses[], files[], and count tables
+// ---------- data + state ----------
+// D (from worker.js): teams[], people[], companies[], statuses[], files[], template, and count tables
 //   act  [team, person, day, n]            emails actioned (sent)        person -1 = no known case owner
 //   clo  [team, person, day, n]            cases closed
 //   inb  [team, person, company, day, ceva, n]   emails received (ceva 1 = from a CEVA address)
 //   sla  [team, person, monday, cases, elapsedMins, slaKnown, slaMet]
 //   open [team, person, status, n]
-let D = null, S = null, V = null, worker = null;
+let D = null, S = null, V = null, X = null, I = null, L = null, worker = null;
+const OVR = new Map();   // name fixes made on the Names tab: "section|name" -> person (this page only)
 const saved = (() => { try { return JSON.parse(localStorage.getItem(STATE_KEY)) || {}; } catch (e) { return {}; } })();
-const saveView = () => { try { localStorage.setItem(STATE_KEY, JSON.stringify({ tab: S.tab, pct: S.pct, sla: S.sla })); } catch (e) {} };
+const saveView = () => { try { localStorage.setItem(STATE_KEY, JSON.stringify({ tab: S.tab })); } catch (e) {} };
 const pName = (p) => (p < 0 ? '(no case owner)' : D.people[p]);
-const byText = (a, b) => a.localeCompare(b, 'en', { sensitivity: 'base', numeric: true });
 const teamOrder = (a, b) => byText(D.teams[a], D.teams[b]);
 const personOrder = (a, b) => (a.p < 0) - (b.p < 0) || byText(pName(a.p), pName(b.p));
 
@@ -52,27 +59,41 @@ function extent() {
   for (const r of D.clo) { lo = Math.min(lo, r[2]); hi = Math.max(hi, r[2]); }
   for (const r of D.inb) { lo = Math.min(lo, r[3]); hi = Math.max(hi, r[3]); }
   for (const r of D.sla) { slaLo = Math.min(slaLo, r[2]); slaHi = Math.max(slaHi, r[2] + 6); }
-  const from = Math.min(lo, slaLo), to = isFinite(hi) ? hi : slaHi;
-  return { lo, hi, slaLo, slaHi, from, to };
+  return { lo, hi, slaLo, slaHi, from: Math.min(lo, slaLo), to: isFinite(hi) ? hi : slaHi };
 }
-let X = null;   // data extent
-const defaults = () => ({ teams: D.teams.map((_, i) => i), person: -1, from: X.from, to: X.to,
-  tab: ['over', 'ac', 'cust', 'sla', 'about'].includes(saved.tab) ? saved.tab : 'over',
-  pct: ['pct', 'recv', 'worked'].includes(saved.pct) ? saved.pct : 'pct', sla: ['avg', 'met', 'n'].includes(saved.sla) ? saved.sla : 'avg' });
-
+// Unfiltered lookups used by the workbook tabs.
+function index() {
+  const pday = new Map(), comp = new Map(), compOwn = new Map(), slaw = new Map(), open = new Map();
+  const slot = (p, d) => { let m = pday.get(p); if (!m) pday.set(p, (m = new Map())); let v = m.get(d); if (!v) m.set(d, (v = [0, 0, 0, 0])); return v; };
+  for (const r of D.act) if (r[1] >= 0) slot(r[1], r[2])[0] += r[3];
+  for (const r of D.clo) if (r[1] >= 0) slot(r[1], r[2])[1] += r[3];
+  for (const r of D.inb) {
+    if (r[1] >= 0) { const v = slot(r[1], r[3]); v[3] += r[5]; if (r[4]) v[2] += r[5]; }
+    let m = comp.get(r[2]); if (!m) comp.set(r[2], (m = new Map())); m.set(r[3], (m.get(r[3]) || 0) + r[5]);
+    if (r[1] >= 0 && !r[4]) { const k = r[1] + ',' + r[2]; let o = compOwn.get(k); if (!o) compOwn.set(k, (o = new Map())); o.set(r[3], (o.get(r[3]) || 0) + r[5]); }
+  }
+  for (const r of D.sla) { if (r[1] < 0) continue; let m = slaw.get(r[1]); if (!m) slaw.set(r[1], (m = new Map())); const v = m.get(r[2]) || [0, 0, 0, 0]; for (let i = 0; i < 4; i++) v[i] += r[3 + i]; m.set(r[2], v); }
+  for (const r of D.open) { if (r[1] < 0) continue; let m = open.get(r[1]); if (!m) open.set(r[1], (m = new Map())); m.set(r[2], (m.get(r[2]) || 0) + r[3]); }
+  const weeks = [...new Set(D.sla.map((r) => r[2]))].sort((a, b) => a - b);
+  // months the exports cover, oldest first
+  const months = [];
+  if (isFinite(X.lo)) for (let k = monthKey(X.lo); k <= monthKey(X.hi); k++) months.push(k);
+  return { pday, comp, compOwn, slaw, open, weeks, months };
+}
+const dflt = () => ({ teams: D.teams.map((_, i) => i), person: -1, from: X.from, to: X.to });
 function load(data) {
-  D = data; X = extent(); S = defaults();
+  D = data; X = extent(); I = index(); OVR.clear();
+  S = { ...dflt(), tab: saved.tab };
   $('#notice').hidden = true;
-  const skipped = D.files.filter((f) => !f.kind);
-  const usable = D.files.filter((f) => f.kind);
-  $('#meta').textContent = `${plural(usable.length, 'report')} · ${plural(D.people.length, 'person')}`.replace('persons', 'people');
-  const miss = ['sent', 'received', 'closed', 'sla'].filter((k) => !usable.some((f) => f.kind === k));
+  const usable = D.files.filter((f) => f.kind && f.kind !== 'workbook'), skipped = D.files.filter((f) => !f.kind);
+  $('#meta').textContent = `${plural(usable.length, 'report')} · ${D.people.length === 1 ? '1 person' : fmtN(D.people.length) + ' people'}`;
   const KN = { sent: 'sent emails (actioned)', received: 'received emails', closed: 'closed cases', sla: 'SLA' };
-  const notes = [];
+  const miss = Object.keys(KN).filter((k) => !usable.some((f) => f.kind === k)), notes = [];
+  if (!D.template) notes.push('The ACTIONED & CLOSED CASE COUNT workbook wasn\'t in the files, so the tabs are laid out by team folder with full names. Load the folder that holds it (closed in Excel) to get your sections, names and customer rows.');
   if (miss.length) notes.push(`No ${miss.map((k) => KN[k]).join(', ')} report was found, so those figures are blank.`);
-  if (skipped.length) notes.push(`${plural(skipped.length, 'file')} skipped (not a case or email report): ${skipped.map((f) => f.name.split('/').pop()).join(', ')}.`);
+  if (skipped.length) notes.push(`Skipped: ${skipped.map((f) => `${f.name.split('/').pop()} (${f.note})`).join(', ')}.`);
   if (notes.length) { $('#notice').hidden = false; $('#notice').textContent = notes.join(' '); }
-  buildFilters(); show('app'); setTab(S.tab);
+  buildLayout(); buildFilters(); buildTabs(); show('app'); setTab(S.tab);
 }
 
 // ---------- screens + loading ----------
@@ -117,7 +138,7 @@ const fromInputEl = (fl) => [...(fl || [])].map((f) => ({ file: f, path: f.webki
 $('#folderInput').addEventListener('change', (e) => { readFiles(fromInputEl(e.target.files)); e.target.value = ''; });
 $('#filesInput').addEventListener('change', (e) => { readFiles(fromInputEl(e.target.files)); e.target.value = ''; });
 $('#cancelBtn').addEventListener('click', () => { if (worker) { worker.terminate(); worker = null; } show(D ? 'app' : 'start'); });
-$('#closeBtn').addEventListener('click', () => { D = null; V = null; show('start'); });
+$('#closeBtn').addEventListener('click', () => { D = null; V = null; L = null; show('start'); });
 
 // Dropped folders are walked so each report keeps its team folder in its path.
 async function dropItems(dtf) {
@@ -142,7 +163,348 @@ document.addEventListener('drop', (e) => {
   dropItems(e.dataTransfer).then(readFiles, (err) => showStartError('Those files could not be opened: ' + err.message));
 });
 
-// ---------- filters ----------
+// ---------- matching workbook names to Salesforce ----------
+// Common nicknames, so BECKY finds Rebecca, PAT finds Patricia and BOB finds Robert.
+const NICK = [['REBECCA', 'BECKY', 'BECCA'], ['ROBERT', 'BOB', 'ROB', 'BOBBY'], ['PATRICIA', 'PAT', 'PATTY', 'TRISH'], ['RAYMOND', 'RAY'],
+  ['WILLIAM', 'BILL', 'WILL', 'BILLY'], ['ELIZABETH', 'LIZ', 'BETH', 'LIZZY'], ['KATHERINE', 'KATHRINE', 'KATHRYN', 'KATE', 'KATIE', 'KATHY'],
+  ['SAMANTHA', 'SAM'], ['SAMUEL', 'SAM'], ['MICHAEL', 'MIKE'], ['JAMES', 'JIM', 'JIMMY'], ['THOMAS', 'TOM'], ['DANIEL', 'DAN', 'DANNY'],
+  ['DAVID', 'DAVE'], ['CHRISTOPHER', 'CHRIS'], ['CHRISTINA', 'CHRIS', 'TINA'], ['JENNIFER', 'JEN', 'JENNY'], ['MEGAN', 'MEG'], ['ANTHONY', 'TONY'],
+  ['NICHOLAS', 'NICK'], ['STEVEN', 'STEVE'], ['STEPHEN', 'STEVE'], ['JOSEPH', 'JOE'], ['JOSHUA', 'JOSH'], ['ALEXANDER', 'ALEX'], ['ALEXANDRA', 'ALEX'],
+  ['DEBORAH', 'DEB', 'DEBBIE'], ['VICTORIA', 'VICKY', 'TORI'], ['ANDREW', 'ANDY', 'DREW'], ['MATTHEW', 'MATT'], ['RICHARD', 'RICK', 'RICH'],
+  ['EDWARD', 'ED', 'EDDIE'], ['TIMOTHY', 'TIM'], ['SUSAN', 'SUE'], ['MARGARET', 'MAGGIE', 'PEGGY'], ['JACQUELINE', 'JACKIE'], ['ABIGAIL', 'ABBY'],
+  ['BENJAMIN', 'BEN'], ['JONATHAN', 'JON'], ['JOHNATHON', 'JON'], ['KIMBERLY', 'KIM'], ['CYNTHIA', 'CINDY'], ['DONALD', 'DON'], ['RONALD', 'RON'],
+  ['KENNETH', 'KEN'], ['GREGORY', 'GREG'], ['JEFFREY', 'JEFF'], ['JEFFERY', 'JEFF'], ['TERESA', 'TERRY'], ['FREDERICK', 'FRED']];
+const toks = (s) => String(s).toUpperCase().split(/[^A-Z0-9]+/).filter(Boolean);
+const nickOf = (w) => { const out = new Set([w]); for (const g of NICK) if (g.includes(w)) g.forEach((x) => out.add(x)); return out; };
+const wordEq = (a, b) => a === b || (a.length >= 3 && b.startsWith(a)) || nickOf(a).has(b);
+// every word of the workbook name matches a word of the Salesforce name ("ADRIANA" -> "Beatriz Adriana Ochoa")
+const nameHit = (label, name) => { const l = toks(label), n = toks(name); return l.length > 0 && l.every((w) => n.some((t) => wordEq(w, t))); };
+// workbook names that mean the same person ("Pat" on WEEKLY SLA = "PATRICIA" on the month tab)
+const labelEq = (a, b) => { const x = toks(a).join(' '), y = toks(b).join(' '); return x === y || (x.length >= 3 && y.startsWith(x)) || (y.length >= 3 && x.startsWith(y)) || nickOf(x).has(y); };
+const isWeekday = (d) => { const w = dowOf(d); return w > 0 && w < 6; };
+// How well a person's daily counts fit the workbook's own numbers for that name, on the days both cover
+// (0 = identical). Used when the name alone doesn't decide, e.g. BRENT or SHAY.
+function fit(key, p) {
+  const h = D.template && D.template.hist[key]; if (!h) return null;
+  const pd = I.pday.get(p); let err = 0, base = 0, n = 0;
+  [['act', 0], ['clo', 1]].forEach(([k, i]) => {
+    for (const [ds, v] of Object.entries(h[k])) {
+      const d = +ds; if (d < X.lo || d >= X.hi || !isWeekday(d)) continue;
+      const a = pd && pd.get(d) ? pd.get(d)[i] : 0; err += Math.abs(v - a); base += v; n++;
+    }
+  });
+  return n >= 4 && base > 0 ? err / base : null;
+}
+const activity = (p) => { let n = 0; const m = I.pday.get(p); if (m) for (const v of m.values()) n += v[0] + v[1]; return n; };
+const personByName = (name) => D.people.findIndex((n) => n.toLowerCase() === String(name).trim().toLowerCase());
+
+// L: the layout every workbook tab is drawn from.
+//   sections [{ name, rows: [{ key, label, p, how }] }]   cust [{ label, p, mailbox, ceva, total, customers: [{ label, comps: [] }] }]
+//   sla [{ title, rows: [{ label, p }] }]   open { statuses: [{ label, ids: [] }], rows: [{ label, p }] }
+function buildLayout() {
+  const T = D.template;
+  L = { fromBook: !!(T && T.sections.length), sections: [], cust: [], sla: [], open: null };
+  if (L.fromBook) {
+    const all = D.people.map((_, i) => i);
+    for (const s of T.sections) {
+      const rows = s.labels.map((label) => ({ key: s.name + '|' + label, label, p: -1, how: 'Not found' }));
+      const used = new Set();
+      // 1. fixes from the Names tab or a ROSTER tab, 2. the name, 3. the numbers
+      for (const r of rows) {
+        if (OVR.has(r.key)) { r.p = OVR.get(r.key); r.how = 'Picked on this page'; }
+        else {
+          const ro = (T.roster || []).find((x) => labelEq(x.label, r.label) && (!x.section || labelEq(x.section, s.name)));
+          const p = ro ? personByName(ro.name) : -1;
+          if (p >= 0) { r.p = p; r.how = 'ROSTER tab'; }
+          else {
+            const cands = all.filter((i) => nameHit(r.label, D.people[i]));
+            if (cands.length === 1) { r.p = cands[0]; r.how = 'Name'; }
+            else if (cands.length > 1) {
+              const scored = cands.map((i) => [i, fit(r.key, i)]).filter((x) => x[1] != null).sort((a, b) => a[1] - b[1]);
+              r.p = scored.length ? scored[0][0] : cands.sort((a, b) => activity(b) - activity(a))[0];
+              r.how = scored.length ? 'Name and numbers' : 'Name (several match: check)';
+            }
+          }
+        }
+        if (r.p >= 0) used.add(r.p);
+      }
+      for (const r of rows) {
+        if (r.p >= 0 || OVR.has(r.key)) continue;
+        const best = all.filter((i) => !used.has(i)).map((i) => [i, fit(r.key, i)]).filter((x) => x[1] != null && x[1] <= 0.35).sort((a, b) => a[1] - b[1])[0];
+        if (best) { r.p = best[0]; r.how = 'Numbers match'; used.add(best[0]); }
+      }
+      L.sections.push({ name: s.name, rows });
+    }
+    const findRow = (sec, label) => { const s = L.sections.find((x) => !sec || x.name === sec); const pool = s ? [s] : L.sections; for (const x of pool) { const r = x.rows.find((y) => labelEq(y.label, label)); if (r) return r; } return null; };
+    const anyRow = (label) => { for (const s of L.sections) { const r = s.rows.find((y) => labelEq(y.label, label)); if (r) return r; } return null; };
+    // CUST E-MAILS blocks: the rep comes from the E-MAILS ACTIONED formula, else from the name
+    for (const b of T.cust) {
+      const r = (b.ref && findRow(b.ref.section, b.ref.label)) || anyRow(b.label), p = r ? r.p : -1, allowed = teamCompanies(p);
+      L.cust.push({ label: b.label, p, mailbox: b.mailbox, ceva: b.ceva, total: b.total || !b.mailbox,
+        customers: b.customers.map((c) => ({ label: c, comps: matchCompanies(c, allowed) })) });
+    }
+    // WEEKLY SLA lists: each list belongs to the section where most of its names are found
+    for (const list of T.sla) {
+      const sec = L.sections.map((s) => [s, list.labels.filter((l) => s.rows.some((r) => labelEq(r.label, l))).length]).sort((a, b) => b[1] - a[1])[0];
+      L.sla.push({ title: list.title || (sec ? sec[0].name : ''), rows: list.labels.map((l) => {
+        const r = sec && sec[1] ? sec[0].rows.find((x) => labelEq(x.label, l)) : null;
+        let p = r ? r.p : -1;
+        if (!r) { const c = D.people.map((_, i) => i).filter((i) => nameHit(l, D.people[i])); if (c.length === 1) p = c[0]; }
+        return { label: l, p };
+      }) });
+    }
+    if (T.open) L.open = { statuses: T.open.statuses.map((s) => ({ label: s, ids: statusIds(s) })), rows: T.open.names.map((n) => {
+      let p = personByName(n); if (p < 0) { const c = D.people.map((_, i) => i).filter((i) => nameHit(n, D.people[i])); if (c.length === 1) p = c[0]; }
+      return { label: n, p };
+    }) };
+  } else {
+    // Without the workbook: one section per team folder, full names A to Z.
+    const by = new Map();
+    for (const tbl of [D.act, D.clo, D.inb, D.sla]) for (const r of tbl) if (r[1] >= 0) { if (!by.has(r[0])) by.set(r[0], new Set()); by.get(r[0]).add(r[1]); }
+    for (const t of [...by.keys()].sort(teamOrder)) {
+      const ps = [...by.get(t)].sort((a, b) => byText(D.people[a], D.people[b]));
+      L.sections.push({ name: D.teams[t].toUpperCase(), rows: ps.map((p) => ({ key: D.teams[t] + '|' + D.people[p], label: D.people[p], p, how: 'Salesforce name' })) });
+      for (const p of ps) {
+        const comps = [...new Set(D.inb.filter((r) => r[1] === p && !r[4]).map((r) => r[2]))].sort((a, b) => byText(D.companies[a], D.companies[b]));
+        L.cust.push({ label: D.people[p], p, mailbox: false, ceva: true, total: true, ownerOnly: true, customers: comps.map((c) => ({ label: D.companies[c], comps: [c] })) });
+      }
+      L.sla.push({ title: D.teams[t], rows: ps.filter((p) => I.slaw.has(p)).map((p) => ({ label: D.people[p], p })) });
+    }
+  }
+  if (!L.open) {
+    const ps = [...I.open.keys()].sort((a, b) => byText(D.people[a], D.people[b]));
+    L.open = { statuses: D.statuses.map((s, i) => ({ label: s, ids: [i] })).sort((a, b) => statusRank(a.label) - statusRank(b.label)), rows: ps.map((p) => ({ label: D.people[p], p })) };
+  }
+}
+const STATUS_ORDER = ['new', 're opened', 'answer received', 'in progress', 'on hold', 'escalated'];
+const sNorm = (s) => String(s).toLowerCase().replace(/[^a-z]+/g, ' ').trim();
+const statusRank = (s) => { const i = STATUS_ORDER.findIndex((x) => sNorm(s).startsWith(x)); return i < 0 ? 99 : i; };
+// "In progress - Follow up needed" on the sheet = "In Progress" in Salesforce
+const statusIds = (label) => D.statuses.map((s, i) => [s, i]).filter(([s]) => { const a = sNorm(s), b = sNorm(label); return a && b && (a.startsWith(b) || b.startsWith(a)); }).map((x) => x[1]);
+
+// Customer rows on CUST E-MAILS use the workbook's own names ("BEACH CAMERA"); they are matched to
+// Salesforce company names by their words, rare words counting more. A company is counted when most of
+// the row's words and most of the company's own words agree ("FREIGHT CLUB" is Freight Club, not BJ's
+// Wholesale Club). If nothing agrees that well, companies containing every known word of the row, starting
+// with its first word, are used ("LKQ" -> LKQ Corporate Headquarters). The Names tab lists every match.
+const STOP = new Set(['INC', 'LLC', 'LTD', 'CORP', 'CORPORATION', 'CO', 'COMPANY', 'THE', 'OF', 'AND', 'DBA', 'PARENT', 'HOLDINGS', 'GROUP', 'US', 'USA']);
+let CT = null;
+const ctoks = (s) => toks(s).filter((w) => w.length >= 2 && !STOP.has(w));
+// same word, an abbreviation of it ("HSN" / "HSNI"), a plural ("HOMES" / "HOME") or a one-letter typo ("WALTZ" / "WALTS")
+const typo = (a, b) => a.length >= 5 && a.length === b.length && [...a].filter((x, i) => x !== b[i]).length === 1;
+const tokEq = (l, c) => l === c || (l.length >= 3 && c.startsWith(l) && c.length - l.length <= 2) || (c.length >= 4 && l.startsWith(c) && l.length - c.length <= 1) || typo(l, c);
+// Only companies with emails in the rep's own team folder are considered.
+function teamCompanies(p) {
+  if (p < 0) return null;
+  const row = D.act.find((r) => r[1] === p) || D.clo.find((r) => r[1] === p) || D.inb.find((r) => r[1] === p);
+  return row ? new Set(D.inb.filter((r) => r[0] === row[0]).map((r) => r[2])) : null;
+}
+function matchCompanies(label, allowed) {
+  if (!CT || CT.src !== D) {
+    const t = D.companies.map(ctoks), df = new Map();
+    for (const ts of t) for (const w of new Set(ts)) df.set(w, (df.get(w) || 0) + 1);
+    CT = { src: D, t, joined: D.companies.map((c) => toks(c).join('')), idfC: (w) => Math.log(1 + t.length / (df.get(w) || 1)) };
+  }
+  const N = CT.t.length, words = ctoks(label), joined = toks(label).join('');
+  const seen = words.map((w) => [w, CT.t.reduce((n, ts) => n + (ts.some((c) => tokEq(w, c)) ? 1 : 0), 0)]).filter((x) => x[1] > 0).map(([w, n]) => [w, Math.log(1 + N / n)]);
+  const strong = [], loose = [];
+  CT.t.forEach((ts, c) => {
+    if (allowed && !allowed.has(c)) return;
+    if (joined.length >= 5 && CT.joined[c].includes(joined)) { strong.push(c); return; }   // "SHIP DADDY" = ShipDaddy
+    if (!seen.length || !ts.length) return;
+    let lm = 0, lt = 0, all = true;
+    for (const [w, idf] of seen) { lt += idf; if (ts.some((x) => tokEq(w, x))) lm += idf; else all = false; }
+    let cm = 0, ctot = 0;
+    for (const x of ts) { const i = CT.idfC(x); ctot += i; if (seen.some(([w]) => tokEq(w, x))) cm += i; }
+    if (lm / lt >= 0.5 && cm / ctot >= 0.5 && seen.some(([w]) => w === words[0])) strong.push(c);
+    else if (all && words.length && seen[0][0] === words[0]) loose.push(c);
+  });
+  return strong.length ? strong : loose;
+}
+
+// ---------- tabs ----------
+function buildTabs() {
+  const tabs = [];
+  for (const k of I.months) tabs.push([`m${k}`, sheetName(k)], [`c${k}`, `CUST E-MAILS ${SHEET_MON[k % 12]}`]);
+  tabs.push(['wsla', 'WEEKLY SLA'], ['open', 'Open cases'], ['over', 'Overview'], ['names', 'Names & sources']);
+  $('#tabs').innerHTML = tabs.map(([id, label]) => `<button class="tab" role="tab" type="button" data-tab="${id}">${esc(label)}</button>`).join('');
+  TABS = tabs.map((t) => t[0]);
+}
+let TABS = [];
+function setTab(t) {
+  // opens on the newest month tab, like the workbook
+  S.tab = TABS.includes(t) ? t : (I.months.length ? `m${I.months[I.months.length - 1]}` : 'over');
+  document.querySelectorAll('#tabs .tab').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === S.tab)));
+  const panel = S.tab[0] === 'm' ? 'month' : S.tab[0] === 'c' ? 'cust' : S.tab;
+  document.querySelectorAll('.panel').forEach((p) => (p.hidden = p.id !== 'p-' + panel));
+  $('.cc-filters').hidden = S.tab !== 'over';
+  saveView(); render();
+}
+$('#tabs').addEventListener('click', (e) => { const b = e.target.closest('.tab'); if (b) setTab(b.dataset.tab); });
+
+// ---------- tables: one model renders to HTML, copies as text and exports to Excel ----------
+// model: { cls, cols: [{ h (html), x (plain), cls, d (day) }], rows: [{ cls, c: [cell] }] }; cell: { v, f, cls, title }
+// f: 's' text, 'n' count (blank when 0), 'z' count (0 shown), 'p' percent, 'hm' minutes shown as h:mm
+const cS = (v, cls, title) => ({ v, f: 's', cls, title }), cN = (v, cls) => ({ v, f: 'n', cls }), cZ = (v, cls) => ({ v, f: 'z', cls }), cP = (v, cls) => ({ v, f: 'p', cls }), cHM = (v, cls) => ({ v, f: 'hm', cls });
+const goalCls = (p) => (p == null ? '' : p < GOAL ? 'low' : 'ok');
+function cellHtml(c) {
+  if (c.f === 's') return esc(c.v ?? '');
+  if (c.v == null || (c.f === 'n' && !c.v)) return '';
+  return c.f === 'n' || c.f === 'z' ? fmtN(c.v) : c.f === 'p' ? fmtP(c.v) : fmtHM(c.v);
+}
+const emptyMsg = (t) => `<div class="empty-s">${t}</div>`;
+function renderTable(el, m, scrollEnd) {
+  if (!el) return;
+  if (!m.rows.length) { el.innerHTML = emptyMsg(m.empty || 'Nothing for these filters.'); return; }
+  const th = m.cols.map((c) => `<th class="${c.cls || ''}">${c.h}</th>`).join('');
+  const body = m.rows.map((r) => `<tr class="${r.cls || ''}">${r.c.map((c, i) => `<td class="${[m.cols[i] && m.cols[i].cls, c.cls].filter(Boolean).join(' ')}"${c.title ? ` title="${esc(c.title)}"` : ''}>${cellHtml(c)}</td>`).join('')}</tr>`).join('');
+  el.innerHTML = `<table class="${m.cls || ''}"><thead><tr>${th}</tr></thead><tbody>${body}</tbody></table>`;
+  if (scrollEnd) el.scrollLeft = el.scrollWidth;
+}
+const col = (h, cls, x) => ({ h, cls, x: x ?? h.replace(/<small>/g, ' ').replace(/<[^>]+>/g, '').replace(/&amp;/g, '&') });
+const dayCol = (d) => ({ ...col(`${DOW[dowOf(d)].toUpperCase()}<small>${md(d)}</small>`, '', md(d)), d });
+const sumBy = (days, f) => { let s = 0; for (const d of days) s += f(d) || 0; return s; };
+
+// ---------- month tab (CASES ACTIONED / CASES CLOSED) ----------
+// The weekdays of the month the exports cover, a TOTAL after each week; days outside the exports are blank.
+function monthWeeks(k) {
+  const a = Math.max(monthStart(k), monday(X.lo)), b = Math.min(monthEnd(k), monday(X.hi) + 4), weeks = [];
+  for (let w = monday(a); w <= b; w += 7) {
+    const days = []; for (let d = w; d < w + 5; d++) if (d >= monthStart(k) && d <= monthEnd(k)) days.push(d);
+    if (days.length) weeks.push(days);
+  }
+  return weeks;
+}
+const covered = (d) => d >= X.lo && d <= X.hi;
+const pv = (p, d, i) => { const m = I.pday.get(p), v = m && m.get(d); return v ? v[i] : 0; };
+function monthModel(k, sec, i) {
+  const weeks = monthWeeks(k), cols = [col(i ? 'CASES CLOSED' : 'CASES ACTIONED')];
+  for (const w of weeks) { for (const d of w) cols.push(dayCol(d)); cols.push({ ...col('TOTAL', 'wk'), wk: w }); }
+  const cell = (p, d) => (p < 0 || !covered(d) ? cS('') : cZ(pv(p, d, i)));
+  const line = (r) => [cS(r.label, r.p < 0 ? 'muted' : '', r.p >= 0 ? D.people[r.p] : 'No Salesforce match: fix it on the Names & sources tab'),
+    ...cols.slice(1).map((c) => (c.d != null ? cell(r.p, c.d) : r.p < 0 || !c.wk.some(covered) ? cS('') : cZ(sumBy(c.wk.filter(covered), (d) => pv(r.p, d, i)))))];
+  const rows = sec.rows.map((r) => ({ c: line(r) }));
+  const tot = cols.slice(1).map((c) => { const ds = (c.d != null ? [c.d] : c.wk).filter(covered); return ds.length ? cZ(sec.rows.reduce((a, r) => a + (r.p < 0 ? 0 : sumBy(ds, (d) => pv(r.p, d, i))), 0)) : cS(''); });
+  rows.push({ cls: 'total', c: [cS('TOTALS'), ...tot] });
+  return { cls: 'mx mirror', cols, rows };
+}
+function renderMonth(k) {
+  const weeks = monthWeeks(k), first = weeks.length ? weeks[0][0] : null;
+  const gap = first != null && first > monthStart(k) && monday(first) > monthStart(k) ? ` Days before ${md(first)} aren't in these exports.` : '';
+  $('#p-month').innerHTML = `<p class="note">${esc(sheetName(k))} from the exports.${esc(gap)} Hover a name to see who it is in Salesforce.</p>` +
+    L.sections.map((s, j) => `<div class="card"><div class="card-h"><h2>${esc(s.name)}</h2></div>
+      ${[0, 1].map((i) => `<div class="card-h"><span class="sub">${i ? 'CASES CLOSED' : 'CASES ACTIONED'}</span><button class="cc-linkbtn copybtn" type="button" data-copy="#mt-${j}-${i}" title="Copy this table, then paste into Excel">Copy</button></div><div class="tscroll" id="mt-${j}-${i}"></div>`).join('')}
+    </div>`).join('');
+  L.sections.forEach((s, j) => [0, 1].forEach((i) => renderTable($(`#mt-${j}-${i}`), monthModel(k, s, i), true)));
+}
+
+// ---------- CUST E-MAILS tab ----------
+// Per rep: each customer row = every email received for those companies; E-MAILS FROM CEVA STATIONS =
+// emails from CEVA addresses on the rep's cases; E-MAILS ACTIONED = the rep's actioned + closed.
+function custLines(k) {
+  const days = monthWeeks(k).flat(), out = [];
+  const compDay = (cs, d) => cs.reduce((a, c) => { const m = I.comp.get(c); return a + ((m && m.get(d)) || 0); }, 0);
+  const ownDay = (p, cs, d) => cs.reduce((a, c) => { const m = I.compOwn.get(p + ',' + c); return a + ((m && m.get(d)) || 0); }, 0);
+  for (const b of L.cust) {
+    const custF = b.customers.map((c) => ({ label: c.label, comps: c.comps, f: (d) => (b.ownerOnly ? ownDay(b.p, c.comps, d) : compDay(c.comps, d)) }));
+    const ceva = (d) => (b.ceva && b.p >= 0 ? pv(b.p, d, 2) : 0);
+    const total = (d) => custF.reduce((a, c) => a + c.f(d), 0) + ceva(d);
+    const act = (d) => (b.p >= 0 ? pv(b.p, d, 0) + pv(b.p, d, 1) : 0);
+    if (!b.mailbox) out.push({ kind: 'rep', label: b.label, p: b.p });
+    for (const c of custF) out.push({ kind: b.mailbox ? 'mbx' : 'cust', label: b.mailbox ? '' : c.label, title: c.comps.length ? c.comps.map((x) => D.companies[x]).join(', ') : 'No Salesforce company matched', f: c.f, head: b.mailbox ? b.label : null });
+    if (b.ceva) out.push({ kind: 'ceva', label: 'E-MAILS FROM CEVA STATIONS', f: ceva });
+    if (b.total) out.push({ kind: 'total', label: 'TOTAL', f: total });
+    out.push({ kind: 'act', label: 'E-MAILS ACTIONED', f: act, title: b.p >= 0 ? `${D.people[b.p]}: emails actioned + cases closed` : 'Rep not matched' });
+    out.push({ kind: 'pct', label: '% ACTIONED (GOAL 85%)', f: (d) => [act(d), total(d)] });
+  }
+  return { days, lines: out };
+}
+function custModel(k) {
+  const { days, lines } = custLines(k), cdays = days.filter(covered);
+  const cols = [col('CUSTOMER / REP'), ...days.map(dayCol), col('TOTALS', 'wk')];
+  const rows = [];
+  for (const ln of lines) {
+    if (ln.kind === 'rep') { rows.push({ cls: 'grp', c: [cS(ln.label, '', ln.p >= 0 ? D.people[ln.p] : 'Rep not matched'), ...cols.slice(1).map(() => cS(''))] }); continue; }
+    if (ln.kind === 'mbx') rows.push({ cls: 'grp', c: [cS(ln.head), ...cols.slice(1).map(() => cS(''))] });
+    if (ln.kind === 'pct') {
+      const p = (v) => (v && v[1] ? v[0] / v[1] : null), all = cdays.reduce((a, d) => { const v = ln.f(d); return [a[0] + v[0], a[1] + v[1]]; }, [0, 0]);
+      rows.push({ cls: 'key', c: [cS(ln.label), ...days.map((d) => { if (!covered(d)) return cS(''); const x = p(ln.f(d)); return cP(x, goalCls(x)); }), cP(p(all), goalCls(p(all)))] });
+      continue;
+    }
+    rows.push({ cls: ln.kind === 'total' ? 'sub' : ln.kind === 'act' || ln.kind === 'ceva' ? 'key' : '',
+      c: [cS(ln.label || 'E-mails received', ln.kind === 'mbx' ? 'muted' : '', ln.title), ...days.map((d) => (covered(d) ? cZ(ln.f(d)) : cS(''))), cZ(sumBy(cdays, ln.f))] });
+  }
+  return { cls: 'mx mirror', cols, rows, empty: 'No CUST E-MAILS layout.' };
+}
+function renderCust(k) {
+  $('#p-cust').innerHTML = `<div class="card"><div class="card-h"><h2>CUST E-MAILS ${esc(SHEET_MON[k % 12])}</h2><span class="sub">goal 85%; hover a customer to see the Salesforce companies counted</span><button class="cc-linkbtn copybtn" type="button" data-copy="#mCust" title="Copy this table, then paste into Excel">Copy</button></div><div class="tscroll tall" id="mCust"></div></div>`;
+  renderTable($('#mCust'), custModel(k), true);
+}
+
+// ---------- WEEKLY SLA ----------
+// RUN DATE = the Monday after the week the cases were opened; the figure is the average first
+// response (Elapsed Time) of that person's cases, h:mm. TEAM AVERAGE averages the people with cases.
+const slaOf = (p, w) => { const m = I.slaw.get(p), v = m && m.get(w); return v && v[0] ? v : null; };
+function slaModel(list) {
+  const weeks = I.weeks, cols = [col('CSR'), ...weeks.map((w) => ({ ...col(`RUN DATE<small>${md(w + 7)}</small>`, '', `RUN DATE ${md(w + 7)}`), d: w + 7 }))];
+  const rows = list.rows.map((r) => ({ c: [cS(r.label, r.p < 0 ? 'muted' : '', r.p >= 0 ? D.people[r.p] : 'No Salesforce match'), ...weeks.map((w) => { if (r.p < 0) return cS(''); const v = slaOf(r.p, w); return cHM(v ? v[1] / v[0] : 0); })] }));
+  rows.push({ cls: 'total', c: [cS('TEAM AVERAGE'), ...weeks.map((w) => { const xs = list.rows.map((r) => (r.p >= 0 ? slaOf(r.p, w) : null)).filter(Boolean).map((v) => v[1] / v[0]); return xs.length ? cHM(xs.reduce((a, b) => a + b, 0) / xs.length) : cS(''); })] });
+  return { cls: 'mx mirror', cols, rows, empty: 'No SLA report loaded.' };
+}
+function renderSla() {
+  const lists = L.sla.filter((l) => l.rows.length);
+  $('#p-wsla').innerHTML = !D.sla.length ? `<div class="card">${emptyMsg('Load the SLA report (the export with Elapsed Time and SLA Breached?) to fill WEEKLY SLA.')}</div>` :
+    `<p class="note">SLA 1ST RESPONSE = average time to first response (h:mm) of the cases opened in the week before each run date. Newest run date on the right.</p>` +
+    lists.map((l, j) => `<div class="card"><div class="card-h"><h2>${esc(l.title || 'SLA')}</h2><span class="sub">SLA 1ST RESPONSE</span><button class="cc-linkbtn copybtn" type="button" data-copy="#ws-${j}" title="Copy this table, then paste into Excel">Copy</button></div><div class="tscroll" id="ws-${j}"></div></div>`).join('');
+  lists.forEach((l, j) => renderTable($(`#ws-${j}`), slaModel(l), true));
+}
+
+// ---------- Open cases ----------
+function openModel() {
+  const cols = [col('CSR'), ...L.open.statuses.map((s) => col(esc(s.label))), col('Total Per person', 'wk')];
+  const n = (p, s) => (p < 0 ? 0 : s.ids.reduce((a, i) => a + ((I.open.get(p) && I.open.get(p).get(i)) || 0), 0));
+  const rows = L.open.rows.map((r) => { const v = L.open.statuses.map((s) => n(r.p, s)); return { c: [cS(r.label, r.p < 0 ? 'muted' : '', r.p >= 0 ? D.people[r.p] : 'No Salesforce match'), ...v.map((x) => cN(x)), cZ(v.reduce((a, b) => a + b, 0))] }; });
+  const tot = L.open.statuses.map((s) => L.open.rows.reduce((a, r) => a + n(r.p, s), 0));
+  rows.push({ cls: 'total', c: [cS('Totals per Status'), ...tot.map((x) => cZ(x)), cZ(tot.reduce((a, b) => a + b, 0))] });
+  return { cols, rows, empty: 'No open cases.' };
+}
+function renderOpen() {
+  $('#p-open').innerHTML = `<div class="card"><div class="card-h"><h2>Open cases</h2><span class="sub">cases in the SLA export that aren't closed yet${D.files.some((f) => f.kind === 'sla') ? ` (opened ${span(X.slaLo, X.slaHi - 6 > X.slaLo ? X.slaHi - 1 : X.slaHi)})` : ''}</span><button class="cc-linkbtn copybtn" type="button" data-copy="#tOpen" title="Copy this table, then paste into Excel">Copy</button></div><div class="tscroll" id="tOpen"></div></div>`;
+  renderTable($('#tOpen'), openModel());
+}
+
+// ---------- Names & sources ----------
+function renderNames() {
+  const opts = (p) => `<option value="-1">(none)</option>` + D.people.map((n, i) => [n, i]).sort((a, b) => byText(a[0], b[0])).map(([n, i]) => `<option value="${i}"${i === p ? ' selected' : ''}>${esc(n)}</option>`).join('');
+  $('#namesNote').innerHTML = L.fromBook
+    ? `Names come from the <b>${esc(D.template.month)}</b> tab. Each is matched to a Salesforce case owner by name, nickname, or by comparing the workbook's own numbers with the exports. Pick a different person to fix a match; fixes last until the page is closed. To keep them, add a <b>ROSTER</b> tab to the workbook with the workbook name in column A and the Salesforce name in column B.`
+    : 'The workbook wasn\'t loaded, so each team folder is a section and full Salesforce names are used.';
+  $('#tNames').innerHTML = `<table><thead><tr><th>Section</th><th>Name in workbook</th><th>Salesforce case owner</th><th>Matched by</th></tr></thead><tbody>` +
+    L.sections.flatMap((s) => s.rows.map((r) => `<tr><td>${esc(s.name)}</td><td>${esc(r.label)}</td><td>${L.fromBook ? `<select data-key="${esc(r.key)}" aria-label="Salesforce name for ${esc(r.label)}">${opts(r.p)}</select>` : esc(pName(r.p))}</td><td class="${r.p < 0 || /check/.test(r.how) ? 'low' : ''}">${esc(r.how)}</td></tr>`)).join('') + '</tbody></table>';
+  $('#tCustMap').innerHTML = L.cust.length ? `<table><thead><tr><th>Rep</th><th>Customer row</th><th>Salesforce companies counted</th></tr></thead><tbody>` +
+    L.cust.flatMap((b) => b.customers.map((c) => `<tr><td>${esc(b.label)}</td><td>${esc(c.label)}</td><td class="${c.comps.length ? '' : 'low'}" style="white-space:normal;text-align:left">${c.comps.length ? esc(c.comps.map((x) => D.companies[x]).join(' · ')) : 'none matched'}</td></tr>`)).join('') + '</tbody></table>' : emptyMsg('No customer rows.');
+  about();
+}
+$('#p-names').addEventListener('change', (e) => {
+  const s = e.target.closest('select[data-key]'); if (!s) return;
+  OVR.set(s.dataset.key, +s.value); buildLayout(); renderNames();
+});
+const KIND = { sent: 'Emails sent (actioned)', received: 'Emails received', closed: 'Cases closed', sla: 'SLA', workbook: 'Workbook layout' };
+function about() {
+  $('#about').innerHTML = `<p>How each tab is filled from the Salesforce exports:</p>
+    <ul>
+      <li><b>CASES ACTIONED</b>: emails sent on the cases a person owns, on the email's date (every row of the sent-emails report).</li>
+      <li><b>CASES CLOSED</b>: cases whose Date/Time Closed falls on that day, credited to the case's current owner. Salesforce keeps only a case's latest close, so closures that were later reopened, or cases now owned by a queue, aren't counted; this is why closed can run lower than numbers typed in during the day.</li>
+      <li><b>CUST E-MAILS</b>: each customer row counts every email received for the Salesforce companies matched to it (listed below). <b>E-MAILS FROM CEVA STATIONS</b> are emails from @cevalogistics.com addresses on the rep's cases. <b>E-MAILS ACTIONED</b> = the rep's actioned + closed; <b>% ACTIONED</b> = that ÷ TOTAL, goal 85%.</li>
+      <li><b>WEEKLY SLA</b>: the average Elapsed Time to first response of the cases opened in the week before each run date (h:mm); TEAM AVERAGE averages the people who had cases.</li>
+      <li><b>Open cases</b>: cases in the SLA export whose status isn't Closed.</li>
+      <li>Only weekdays are shown, like the workbook. PTO isn't in Salesforce, so a day off shows 0. Days the exports don't cover are blank. The KASEY ship counts and the EMAIL VS SHIP COUNT and New Cases tabs aren't in these exports.</li>
+    </ul>`;
+  renderTable($('#tFiles'), { cols: [col('File'), col('Team'), col('Report'), col('Rows'), col('Dates')],
+    rows: D.files.map((f) => ({ cls: f.kind ? '' : 'muted', c: [cS(f.name), cS(f.team || '–'), cS(f.kind ? (f.kind === 'workbook' ? `${KIND.workbook}: ${f.note}` : KIND[f.kind]) : f.note || 'Skipped'), cN(f.rows), cS(f.from != null ? span(f.from, f.to) + (f.kind === 'sla' ? ' (opened)' : '') : '')] })) });
+}
+
+// ---------- Overview (filters apply here only) ----------
 function buildFilters() {
   $('#teamChips').innerHTML = D.teams.map((t, i) => [t, i]).sort((a, b) => byText(a[0], b[0]))
     .map(([t, i]) => `<button class="chip" type="button" data-t="${i}" aria-pressed="${S.teams.includes(i)}">${esc(t)}</button>`).join('');
@@ -150,7 +512,6 @@ function buildFilters() {
   for (const id of ['#fFrom', '#fTo']) { $(id).min = toInput(X.from); $(id).max = toInput(X.to); }
   $('#fFrom').value = toInput(S.from); $('#fTo').value = toInput(S.to);
 }
-// People with any activity, grouped by team; only the selected teams are listed.
 function fillPeople() {
   const ts = new Set(S.teams), by = new Map();
   for (const tbl of [D.act, D.clo, D.inb, D.sla, D.open]) for (const r of tbl) if (r[1] >= 0 && ts.has(r[0])) { if (!by.has(r[0])) by.set(r[0], new Set()); by.get(r[0]).add(r[1]); }
@@ -170,18 +531,8 @@ $('#teamChips').addEventListener('click', (e) => {
 $('#fPerson').addEventListener('change', (e) => { S.person = +e.target.value; render(); });
 $('#fFrom').addEventListener('change', (e) => { const d = fromInput(e.target.value); S.from = d == null ? X.from : d; if (S.from > S.to) { S.to = S.from; $('#fTo').value = toInput(S.to); } render(); });
 $('#fTo').addEventListener('change', (e) => { const d = fromInput(e.target.value); S.to = d == null ? X.to : d; if (S.to < S.from) { S.from = S.to; $('#fFrom').value = toInput(S.from); } render(); });
-$('#resetBtn').addEventListener('click', () => { const { tab, pct, sla } = S; S = { ...defaults(), tab, pct, sla }; buildFilters(); render(); });
+$('#resetBtn').addEventListener('click', () => { Object.assign(S, dflt()); buildFilters(); render(); });
 
-const TABS = ['over', 'ac', 'cust', 'sla', 'about'];
-function setTab(t) {
-  S.tab = TABS.includes(t) ? t : 'over';
-  document.querySelectorAll('.cc-tabs .tab').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === S.tab)));
-  document.querySelectorAll('.panel').forEach((p) => (p.hidden = p.id !== 'p-' + S.tab));
-  saveView(); render();
-}
-$('.cc-tabs').addEventListener('click', (e) => { const b = e.target.closest('.tab'); if (b) setTab(b.dataset.tab); });
-
-// ---------- aggregation for the current filters ----------
 // V.pd: per team+person, a Map of day -> [actioned, closed, received, receivedFromCeva]
 function aggregate() {
   const ts = new Set(S.teams), ok = (r) => ts.has(r[0]) && (S.person < 0 || r[1] === S.person), inR = (d) => d >= S.from && d <= S.to;
@@ -194,56 +545,26 @@ function aggregate() {
   };
   for (const r of D.act) if (ok(r) && inR(r[2])) slot(r[0], r[1], r[2])[0] += r[3];
   for (const r of D.clo) if (ok(r) && inR(r[2])) slot(r[0], r[1], r[2])[1] += r[3];
-  const cust = new Map();   // company -> Map(day -> n), customers only (CEVA addresses are their own row)
-  for (const r of D.inb) {
-    if (!ok(r) || !inR(r[3])) continue;
-    const v = slot(r[0], r[1], r[3]); v[2] += r[5]; if (r[4]) v[3] += r[5];
-    if (!r[4]) { let m = cust.get(r[2]); if (!m) cust.set(r[2], (m = new Map())); m.set(r[3], (m.get(r[3]) || 0) + r[5]); }
-  }
-  const sla = new Map(), weeks = new Set();   // team,person -> Map(monday -> [cases, mins, known, met])
+  for (const r of D.inb) if (ok(r) && inR(r[3])) { const v = slot(r[0], r[1], r[3]); v[2] += r[5]; if (r[4]) v[3] += r[5]; }
+  const sla = new Map();
   for (const r of D.sla) {
     if (!ok(r) || r[2] + 6 < S.from || r[2] > S.to) continue;
     const k = r[0] + ',' + r[1]; let o = sla.get(k);
     if (!o) sla.set(k, (o = { t: r[0], p: r[1], wk: new Map() }));
     const v = o.wk.get(r[2]) || [0, 0, 0, 0]; for (let i = 0; i < 4; i++) v[i] += r[3 + i]; o.wk.set(r[2], v);
-    weeks.add(r[2]);
   }
-  const open = new Map();   // team,person -> Map(status -> n); a snapshot, so the dates don't apply
+  const open = new Map();
   for (const r of D.open) {
     if (!ok(r)) continue;
     const k = r[0] + ',' + r[1]; let o = open.get(k);
     if (!o) open.set(k, (o = { t: r[0], p: r[1], st: new Map() }));
     o.st.set(r[2], (o.st.get(r[2]) || 0) + r[3]);
   }
-  V = { pd, days: [...days].sort((a, b) => a - b), cust, sla, weeks: [...weeks].sort((a, b) => a - b), open };
+  V = { pd, days: [...days].sort((a, b) => a - b), sla, open };
 }
 const addVec = (a, b) => { if (!b) return a; if (!a) return b.slice(); for (let i = 0; i < b.length; i++) a[i] += b[i]; return a; };
-const sumDays = (m, ds) => { let v = null; for (const d of ds) v = addVec(v, m.get(d)); return v; };
 const mergeMaps = (maps) => { const out = new Map(); for (const m of maps) for (const [k, v] of m) out.set(k, addVec(out.get(k), v)); return out; };
 const pctOf = (v) => (v && v[2] ? (v[0] + v[1]) / v[2] : null);
-
-// ---------- tables: one model renders to HTML, copies as text and exports to Excel ----------
-// model: { cls, cols: [{ h (html), x (plain), cls }], rows: [{ cls, c: [cell] }] }; cell: { v, f, cls }
-// f: 's' text, 'n' count (blank when 0), 'p' percent, 'hm' minutes shown as h:mm
-const cS = (v, cls) => ({ v, f: 's', cls }), cN = (v, cls) => ({ v, f: 'n', cls }), cP = (v, cls) => ({ v, f: 'p', cls }), cHM = (v, cls) => ({ v, f: 'hm', cls });
-const goalCls = (p) => (p == null ? '' : p < GOAL ? 'low' : 'ok');
-function cellHtml(c) {
-  if (c.f === 's') return esc(c.v ?? '');
-  if (c.v == null || (c.f === 'n' && !c.v)) return '';
-  return c.f === 'n' ? fmtN(c.v) : c.f === 'p' ? fmtP(c.v) : fmtHM(c.v);
-}
-const emptyMsg = (t) => `<div class="empty-s">${t}</div>`;
-function renderTable(el, m, scrollEnd) {
-  if (!m.rows.length) { el.innerHTML = emptyMsg(m.empty || 'Nothing for these filters.'); return; }
-  const th = m.cols.map((c) => `<th class="${c.cls || ''}">${c.h}</th>`).join('');
-  const body = m.rows.map((r) => `<tr class="${r.cls || ''}">${r.c.map((c, i) => `<td class="${[m.cols[i] && m.cols[i].cls, c.cls].filter(Boolean).join(' ')}">${cellHtml(c)}</td>`).join('')}</tr>`).join('');
-  el.innerHTML = `<table class="${m.cls || ''}"><thead><tr>${th}</tr></thead><tbody>${body}</tbody></table>`;
-  if (scrollEnd) el.scrollLeft = el.scrollWidth;
-}
-const col = (h, cls, x) => ({ h, cls, x: x ?? h.replace(/<small>/g, ' ').replace(/<[^>]+>/g, '').replace(/&amp;/g, '&') });
-
-// Rows grouped by team (a heading row, the people A to Z, a team total), then a grand total.
-// With one team the headings and team totals are left out.
 function grouped(keys, rowOf, subOf, totalOf) {
   const byT = new Map();
   for (const k of keys) { if (!byT.has(k.t)) byT.set(k.t, []); byT.get(k.t).push(k); }
@@ -258,35 +579,6 @@ function grouped(keys, rowOf, subOf, totalOf) {
   return out;
 }
 const groupRow = (label, n) => ({ cls: 'grp', c: [cS(label), ...Array.from({ length: n - 1 }, () => cS(''))] });
-
-// Day columns with a weekly total after each week, like the monthly tabs of the workbook.
-function dayCols(days) {
-  const out = []; let wk = null, cur = [];
-  const flush = () => { if (cur.length) out.push({ wk, days: cur }); };
-  for (const d of days) { const m = monday(d); if (m !== wk) { flush(); wk = m; cur = []; } cur.push(d); out.push({ d }); }
-  flush();
-  return out;
-}
-// rows: [{ label, vals: Map(day -> vec), cellOf?, cls? } | { group }]
-function dayMatrix(rows, days, cellOf, first = 'Person') {
-  const dc = dayCols(days), now = today();
-  const cols = [col(first), col('Total', 'tot'), ...dc.map((c) => (c.d != null
-    ? col(`${DOW[dowOf(c.d)]}<small>${md(c.d)}</small>`, c.d === now ? 'now' : '', `${DOW[dowOf(c.d)]} ${md(c.d)}`)
-    : col(`W${isoWeek(c.wk)}<small>total</small>`, 'wk', `W${isoWeek(c.wk)} total`)))];
-  return { cls: 'mx', cols, rows: rows.map((r) => {
-    if (r.group) return groupRow(r.group, cols.length);
-    const f = r.cellOf || cellOf;
-    return { cls: r.cls, c: [cS(r.label, r.lcls), f(sumDays(r.vals, days)), ...dc.map((c) => f(c.d != null ? r.vals.get(c.d) : sumDays(r.vals, c.days)))] };
-  }) };
-}
-function personDayRows(keep = () => true) {
-  const keys = [...V.pd.values()].filter(keep);
-  return grouped(keys, (k) => ({ label: pName(k.p), vals: k.days, lcls: k.p < 0 ? 'muted' : '' }),
-    (t, ks) => ({ label: `${D.teams[t]} total`, vals: mergeMaps(ks.map((k) => k.days)) }),
-    (ks, multi) => ({ label: multi ? 'All teams' : 'Total', vals: mergeMaps(ks.map((k) => k.days)) }));
-}
-
-// ---------- overview ----------
 function totals(keysPd, keysSla, keysOpen) {
   const t = { act: 0, clo: 0, recv: 0, ceva: 0, cases: 0, mins: 0, known: 0, met: 0, open: 0 };
   for (const k of keysPd) for (const v of k.days.values()) { t.act += v[0]; t.clo += v[1]; t.recv += v[2]; t.ceva += v[3]; }
@@ -294,7 +586,7 @@ function totals(keysPd, keysSla, keysOpen) {
   for (const k of keysOpen) for (const n of k.st.values()) t.open += n;
   return t;
 }
-function tile(label, value, sub, cls = '') { return `<div class="ktile ${cls}"><div class="eyebrow">${label}</div><div class="v">${value}</div><div class="d">${sub}</div></div>`; }
+function tile(label, value, sub) { return `<div class="ktile"><div class="eyebrow">${label}</div><div class="v">${value}</div><div class="d">${sub}</div></div>`; }
 function renderTiles() {
   const t = totals(V.pd.values(), V.sla.values(), V.open.values()), p = t.recv ? (t.act + t.clo) / t.recv : null;
   const pill = p == null ? '' : `<span class="pill ${p >= GOAL ? 'ok' : 'bad'}">${p >= GOAL ? 'meets' : 'below'} the 85% goal</span>`;
@@ -314,7 +606,6 @@ function summaryModel(byTeam) {
     return [cS(label, lcls), cN(t.recv), cN(t.recv - t.ceva), cN(t.ceva), cN(t.act), cN(t.clo), cN(t.act + t.clo), cP(p, goalCls(p)),
       cHM(t.cases ? t.mins / t.cases : null), cP(t.known ? t.met / t.known : null), cN(t.open)];
   };
-  // every team+person seen in any table
   const all = new Map(), keyOf = (o) => o.t + ',' + o.p;
   for (const m of [V.pd, V.sla, V.open]) for (const o of m.values()) if (!all.has(keyOf(o))) all.set(keyOf(o), { t: o.t, p: o.p });
   const parts = (ks) => [ks.map((k) => V.pd.get(keyOf(k))).filter(Boolean), ks.map((k) => V.sla.get(keyOf(k))).filter(Boolean), ks.map((k) => V.open.get(keyOf(k))).filter(Boolean)];
@@ -328,7 +619,6 @@ function summaryModel(byTeam) {
     (t, ks) => ({ c: line(`${D.teams[t]} total`, ...parts(ks)) }), (ks, multi) => ({ c: line(multi ? 'All teams' : 'Total', ...parts(ks)) }));
   return { cols, rows: rows.map((r) => (r.group ? groupRow(r.group, cols.length) : r)) };
 }
-// ---------- daily chart ----------
 const tip = $('#tip');
 function showTip(html, ev) {
   tip.innerHTML = html; tip.hidden = false;
@@ -347,7 +637,7 @@ function dailyChart(el) {
   el.innerHTML = '';
   const days = V.days, all = mergeMaps([...V.pd.values()].map((k) => k.days));
   if (!days.length) { el.innerHTML = emptyMsg('No emails or closed cases for these filters.'); return; }
-  const c = { muted: css('--muted'), grid: css('--o-grid'), axis: css('--o-axis'), card: css('--o-card'), ink: css('--text'), s1: css('--s1'), s3: css('--s3') };
+  const c = { muted: css('--muted'), grid: css('--o-grid'), axis: css('--o-axis'), s1: css('--s1'), s3: css('--s3') };
   const recv = days.map((d) => (all.get(d) || [0, 0, 0])[2]), work = days.map((d) => { const v = all.get(d) || [0, 0]; return v[0] + v[1]; });
   const W = el.clientWidth || 600, H = 260, m = { l: 46, r: 16, t: 14, b: 28 }, iw = W - m.l - m.r, ih = H - m.t - m.b, n = days.length, bw = iw / n;
   const max = niceMax(Math.max(...recv, ...work));
@@ -376,134 +666,25 @@ function dailyChart(el) {
   hit.addEventListener('mouseleave', () => { guide.setAttribute('visibility', 'hidden'); hideTip(); });
 }
 
-// ---------- actioned & closed ----------
-// Only people with emails sent (or cases closed) are listed; days are those with any of either, so the
-// two tables line up.
-function acModel(i) {
-  const keys = [...V.pd.values()], has = (k, d) => { const v = k.days.get(d); return v && (v[0] || v[1]); };
-  return dayMatrix(personDayRows((k) => [...k.days.values()].some((v) => v[i])),
-    V.days.filter((d) => keys.some((k) => has(k, d))), (v) => cN(v ? v[i] : 0));
-}
-
-// ---------- customer emails ----------
-const PCT = { pct: '% actioned', recv: 'Emails received', worked: 'Actioned + closed' };
-function pctModel() {
-  const f = S.pct === 'recv' ? (v) => cN(v ? v[2] : 0) : S.pct === 'worked' ? (v) => cN(v ? v[0] + v[1] : 0) : (v) => { const p = pctOf(v); return cP(p, goalCls(p)); };
-  return dayMatrix(personDayRows(), V.days, f);
-}
-// The CUST E-MAILS block: one row per customer, CEVA station emails, total, emails actioned, % actioned.
-function custModel(search = '') {
-  const q = search.trim().toLowerCase();
-  const all = mergeMaps([...V.pd.values()].map((k) => k.days));
-  const custRows = [...V.cust.entries()].map(([c, m]) => ({ label: D.companies[c], vals: new Map([...m].map(([d, n]) => [d, [n]])) }))
-    .filter((r) => !q || r.label.toLowerCase().includes(q)).sort((a, b) => byText(a.label, b.label));
-  const pick = (i) => new Map([...all].map(([d, v]) => [d, [v[i]]]));
-  const ceva = pick(3), total = pick(2), workedM = new Map([...all].map(([d, v]) => [d, [v[0] + v[1], v[2]]]));
-  const n1 = (v) => cN(v ? v[0] : 0);
-  const rows = [...custRows,
-    { label: 'E-mails from CEVA stations', vals: ceva, cls: 'key' },
-    { label: 'Total received', vals: total, cls: 'sub' },
-    { label: 'E-mails actioned (actioned + closed)', vals: workedM, cls: 'key' },
-    { label: '% actioned (goal 85%)', vals: workedM, cls: 'key', cellOf: (v) => { const p = v && v[1] ? v[0] / v[1] : null; return cP(p, goalCls(p)); } }];
-  return dayMatrix(rows, V.days, n1, 'Customer');
-}
-
-// ---------- SLA ----------
-const SLA = { avg: 'Avg first response', met: 'Within SLA', n: 'Cases' };
-function slaCell(v) {
-  if (!v || !v[0]) return S.sla === 'n' ? cN(0) : cS('');
-  return S.sla === 'n' ? cN(v[0]) : S.sla === 'met' ? cP(v[2] ? v[3] / v[2] : null) : cHM(v[1] / v[0]);
-}
-// Team rows average the people's figures, like TEAM AVERAGE on the WEEKLY SLA tab; case counts add up.
-function slaGroupCell(vs) {
-  if (S.sla === 'n') return cN(vs.reduce((a, v) => a + (v ? v[0] : 0), 0));
-  const xs = vs.filter((v) => v && v[0]).map((v) => (S.sla === 'met' ? (v[2] ? v[3] / v[2] : null) : v[1] / v[0])).filter((x) => x != null);
-  if (!xs.length) return cS('');
-  const avg = xs.reduce((a, b) => a + b, 0) / xs.length;
-  return S.sla === 'met' ? cP(avg) : cHM(avg);
-}
-function slaModel() {
-  const weeks = V.weeks;
-  const cols = [col('Person'), col('All weeks', 'tot'), ...weeks.map((w) => col(`W${isoWeek(w)}<small>${md(w)}–${md(w + 6)}</small>`, '', `W${isoWeek(w)} (${md(w)}–${md(w + 6)})`))];
-  const keys = [...V.sla.values()];
-  const all = (k) => { let v = null; for (const x of k.wk.values()) v = addVec(v, x); return v; };
-  const rows = grouped(keys,
-    (k) => ({ c: [cS(pName(k.p), k.p < 0 ? 'muted' : ''), slaCell(all(k)), ...weeks.map((w) => slaCell(k.wk.get(w)))] }),
-    (t, ks) => ({ c: [cS(S.sla === 'n' ? `${D.teams[t]} total` : `${D.teams[t]} average`), slaGroupCell(ks.map(all)), ...weeks.map((w) => slaGroupCell(ks.map((k) => k.wk.get(w))))] }),
-    (ks, multi) => ({ c: [cS(S.sla === 'n' ? (multi ? 'All teams' : 'Total') : (multi ? 'All teams average' : 'Team average')), slaGroupCell(ks.map(all)), ...weeks.map((w) => slaGroupCell(ks.map((k) => k.wk.get(w))))] }));
-  return { cls: 'mx', cols, rows: rows.map((r) => (r.group ? groupRow(r.group, cols.length) : r)), empty: D.sla.length ? 'No SLA cases for these filters.' : 'Load the SLA report (the export with Elapsed Time and SLA Breached?) to see first response.' };
-}
-const STATUS_ORDER = ['new', 're-opened', 'answer received', 'in progress', 'on hold', 'escalated'];
-function openModel() {
-  const used = new Set(); for (const o of V.open.values()) for (const s of o.st.keys()) used.add(s);
-  const sts = [...used].sort((a, b) => { const x = STATUS_ORDER.indexOf(D.statuses[a].toLowerCase()), y = STATUS_ORDER.indexOf(D.statuses[b].toLowerCase()); return (x < 0 ? 99 : x) - (y < 0 ? 99 : y) || byText(D.statuses[a], D.statuses[b]); });
-  const cols = [col('Person'), ...sts.map((s) => col(esc(D.statuses[s]))), col('Total', 'wk')];
-  const line = (label, objs, lcls) => { const n = sts.map((s) => objs.reduce((a, o) => a + (o.st.get(s) || 0), 0)); return [cS(label, lcls), ...n.map((x) => cN(x)), cN(n.reduce((a, b) => a + b, 0))]; };
-  const rows = grouped([...V.open.values()], (k) => ({ c: line(pName(k.p), [k], k.p < 0 ? 'muted' : '') }),
-    (t, ks) => ({ c: line(`${D.teams[t]} total`, ks) }), (ks, multi) => ({ c: line(multi ? 'All teams' : 'Total', ks) }));
-  return { cols, rows: rows.map((r) => (r.group ? groupRow(r.group, cols.length) : r)), empty: 'No open cases for these filters.' };
-}
-
-// ---------- how it's calculated ----------
-const KIND = { sent: 'Emails sent (actioned)', received: 'Emails received', closed: 'Cases closed', sla: 'SLA' };
-function filesModel() {
-  return { cols: [col('File'), col('Team'), col('Report'), col('Rows'), col('Dates')],
-    rows: D.files.map((f) => ({ cls: f.kind ? '' : 'muted', c: [cS(f.name), cS(f.team || '–'), cS(f.kind ? KIND[f.kind] : f.note || 'Skipped'), cN(f.rows), cS(f.from != null ? span(f.from, f.to) + (f.kind === 'sla' ? ' (opened)' : '') : '')] })) };
-}
-function about() {
-  $('#about').innerHTML = `<p>Rebuilds the <b>ACTIONED &amp; CLOSED CASE COUNT</b> workbook from the Salesforce report exports. Each report type is recognised from its columns, so the file names don't matter.</p>
-    <ul>
-      <li><b>Cases actioned</b>: emails sent on the cases a person owns, counted on the email's date (every row of the sent-emails report).</li>
-      <li><b>Cases closed</b>: cases whose Date/Time Closed falls on that day, credited to the case owner.</li>
-      <li><b>Emails received</b>: every email in the received-emails report. Emails from an @cevalogistics.com address are <b>E-mails from CEVA stations</b>; the rest are customer emails, listed by the case's company. Each email counts for the owner of its case, matched by case number from the other reports.</li>
-      <li><b>% actioned</b> = (emails actioned + cases closed) ÷ emails received, against the <b>85% goal</b>, as on the CUST E-MAILS tabs.</li>
-      <li><b>SLA first response</b>: the average Elapsed Time of the cases opened that week (hours:minutes). <b>Within SLA</b> is the share marked "SLA Met". Team rows average the people's figures, like TEAM AVERAGE on the WEEKLY SLA tab.</li>
-      <li><b>Open cases</b>: cases in the SLA export whose status isn't Closed (New, Re-Opened, Answer Received, In Progress, …).</li>
-      <li><b>Teams</b> are the folders the reports sit in (US East, US West, Legacy, …). A person belongs to the team where most of their activity is.</li>
-      <li>Exports that overlap (for example two weeks with shared days) count each email and case once.</li>
-      <li>PTO isn't in Salesforce, so a day off shows as a blank cell rather than PTO.</li>
-    </ul>`;
-  renderTable($('#tFiles'), filesModel());
-}
-
 // ---------- render ----------
-function choice(sel, key, opts) {
-  const el = $(sel);
-  el.innerHTML = Object.entries(opts).map(([k, l]) => `<button type="button" data-v="${k}" aria-pressed="${S[key] === k}">${l}</button>`).join('');
-  el.onclick = (e) => { const b = e.target.closest('button'); if (b && S[key] !== b.dataset.v) { S[key] = b.dataset.v; saveView(); render(); } };
-}
 function renderHeader() {
-  const sel = S.teams.length === D.teams.length ? 'all teams' : S.teams.map((t) => D.teams[t]).sort(byText).join(', ');
-  $('#eyebrow').textContent = `Cases & emails · ${S.person >= 0 ? D.people[S.person] : sel}`;
+  $('#eyebrow').textContent = L.fromBook ? `Actioned & closed case count · ${L.sections.map((s) => s.name).join(' / ')}` : 'Actioned & closed case count · by team';
   const parts = [];
-  if (V.days.length) parts.push(`Emails and closed cases <b>${span(V.days[0], V.days[V.days.length - 1])}</b>`);
-  if (V.weeks.length) parts.push(`SLA weeks <b>W${isoWeek(V.weeks[0])}${V.weeks.length > 1 ? '–W' + isoWeek(V.weeks[V.weeks.length - 1]) : ''}</b>`);
-  $('#range').innerHTML = parts.join(' · ') || 'No activity in the selected dates.';
+  if (isFinite(X.lo)) parts.push(`Emails and closed cases <b>${span(X.lo, X.hi)}</b>`);
+  if (I.weeks.length) parts.push(`SLA run dates <b>${md(I.weeks[0] + 7)}${I.weeks.length > 1 ? '–' + md(I.weeks[I.weeks.length - 1] + 7) : ''}</b>`);
+  $('#range').innerHTML = parts.join(' · ');
 }
 function render() {
   if (!D) return;
-  aggregate(); renderHeader(); hideTip();
+  renderHeader(); hideTip();
   const t = S.tab;
-  if (t === 'over') { renderTiles(); dailyChart($('#cDaily')); renderTable($('#tTeam'), summaryModel(true)); renderTable($('#tPerson'), summaryModel(false)); }
-  if (t === 'ac') { renderTable($('#mAct'), acModel(0), true); renderTable($('#mClo'), acModel(1), true); }
-  if (t === 'cust') {
-    choice('#pctMetric', 'pct', PCT);
-    $('#pctTitle').textContent = `${PCT[S.pct]} by person and day`;
-    renderTable($('#mPct'), pctModel(), true);
-    $('#custTitle').textContent = S.person >= 0 ? `${D.people[S.person]}: emails received by customer` : 'Emails received by customer';
-    $('#custSub').textContent = `${plural(V.cust.size, 'customer')} · ${S.person >= 0 ? 'cases this person owns' : 'all cases in the selected teams'}`;
-    renderTable($('#mCust'), custModel($('#custSearch').value), true);
-  }
-  if (t === 'sla') {
-    choice('#slaMetric', 'sla', SLA);
-    $('#slaTitle').textContent = `${S.sla === 'avg' ? 'SLA first response' : S.sla === 'met' ? 'Cases within SLA' : 'Cases opened'} by person and week`;
-    $('#slaNote').textContent = S.sla === 'avg' ? 'Average hours:minutes from the case opening to the first response.' : S.sla === 'met' ? 'Share of cases marked "SLA Met".' : 'Cases opened that week, by owner.';
-    renderTable($('#mSla'), slaModel(), true);
-    renderTable($('#tOpen'), openModel());
-  }
-  if (t === 'about') about();
+  if (t[0] === 'm') renderMonth(+t.slice(1));
+  else if (t[0] === 'c') renderCust(+t.slice(1));
+  else if (t === 'wsla') renderSla();
+  else if (t === 'open') renderOpen();
+  else if (t === 'names') renderNames();
+  else if (t === 'over') { aggregate(); renderTiles(); dailyChart($('#cDaily')); renderTable($('#tTeam'), summaryModel(true)); renderTable($('#tPerson'), summaryModel(false)); }
 }
-$('#custSearch').addEventListener('input', () => { if (D && V) renderTable($('#mCust'), custModel($('#custSearch').value), true); });
 let rz = 0;
 addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(() => { if (D && S.tab === 'over') dailyChart($('#cDaily')); }, 150); });
 
@@ -546,37 +727,45 @@ function loadXlsx() {
 function xCell(c) {
   if (c.f === 's') return c.v ?? '';
   if (c.v == null || (c.f === 'n' && !c.v)) return '';
-  return c.f === 'n' ? { t: 'n', v: c.v, z: '#,##0' } : c.f === 'p' ? { t: 'n', v: c.v, z: '0%' } : { t: 'n', v: c.v / 1440, z: '[h]:mm' };
+  return c.f === 'n' || c.f === 'z' ? { t: 'n', v: c.v, z: '#,##0' } : c.f === 'p' ? { t: 'n', v: c.v, z: '0%' } : { t: 'n', v: c.v / 1440, z: '[h]:mm' };
 }
-function filterText() {
-  const sel = S.teams.length === D.teams.length ? 'All teams' : S.teams.map((t) => D.teams[t]).sort(byText).join(', ');
-  return `${sel}${S.person >= 0 ? ' · ' + D.people[S.person] : ''} · ${span(S.from, S.to)}`;
-}
-function sheet(XLSX, title, m) {
-  const aoa = [[title], [filterText()], [], m.cols.map((c) => c.x), ...m.rows.map((r) => r.c.map(xCell))];
-  const ws = XLSX.utils.aoa_to_sheet(aoa);
-  ws['!cols'] = m.cols.map((c, i) => ({ wch: i === 0 ? 34 : Math.max(9, Math.min(18, (c.x || '').length + 2)) }));
-  return ws;
-}
+const xDate = (d) => ({ t: 'n', v: d + 25569, z: 'm/d' });
+const dowRow = (m) => ['', ...m.cols.slice(1).map((c) => (c.d != null ? DOW[dowOf(c.d)].toUpperCase() : ''))];
+const headRow = (m, first) => [first, ...m.cols.slice(1).map((c) => (c.d != null ? xDate(c.d) : c.x))];
+const bodyRows = (m) => m.rows.map((r) => r.c.map(xCell));
+// The export copies the workbook's layout, so blocks can be pasted straight into it.
 async function exportExcel() {
   const btn = $('#exportBtn'), label = btn.textContent;
   btn.disabled = true; btn.textContent = 'Preparing…';
   try {
-    const XLSX = await loadXlsx(), wb = XLSX.utils.book_new(), keep = S.pct;
-    const add = (name, title, m) => XLSX.utils.book_append_sheet(wb, sheet(XLSX, title, m), name);
-    add('By person', 'Summary by person', summaryModel(false));
-    add('By team', 'Summary by team', summaryModel(true));
-    add('Cases actioned', 'CASES ACTIONED', acModel(0));
-    add('Cases closed', 'CASES CLOSED', acModel(1));
-    S.pct = 'pct'; add('% actioned', '% ACTIONED (GOAL 85%) by person and day', pctModel()); S.pct = keep;
-    add('Cust e-mails', S.person >= 0 ? `CUST E-MAILS · ${D.people[S.person]}` : 'CUST E-MAILS', custModel());
-    const keepS = S.sla;
-    S.sla = 'avg'; add('Weekly SLA', 'SLA 1ST RESPONSE (h:mm) by week opened', slaModel());
-    S.sla = 'met'; add('SLA met', 'Cases within SLA by week opened', slaModel());
-    S.sla = keepS;
-    add('Open cases', 'Open cases by status', openModel());
+    const XLSX = await loadXlsx(), wb = XLSX.utils.book_new();
+    const add = (name, aoa, widths) => { const ws = XLSX.utils.aoa_to_sheet(aoa); ws['!cols'] = widths; XLSX.utils.book_append_sheet(wb, ws, name.slice(0, 31)); };
+    for (const k of I.months) {
+      const aoa = [];
+      for (const s of L.sections) {
+        aoa.push([s.name]);
+        for (const i of [0, 1]) { const m = monthModel(k, s, i); aoa.push(dowRow(m), headRow(m, i ? 'CASES CLOSED' : 'CASES ACTIONED'), ...bodyRows(m), []); }
+        aoa.push([]);
+      }
+      add(sheetName(k), aoa, [{ wch: 18 }]);
+      const m = custModel(k), cAoa = [headRow(m, 'CUSTOMER / REP')];
+      for (const r of m.rows) cAoa.push(r.c.map(xCell));
+      add(`CUST E-MAILS ${SHEET_MON[k % 12]}`, cAoa, [{ wch: 30 }]);
+    }
+    if (D.sla.length) {
+      const lists = L.sla.filter((l) => l.rows.length), aoa = [lists.flatMap((l) => [l.title, '', ''])];
+      I.weeks.forEach((w, wi) => {
+        const ms = lists.map(slaModel), height = Math.max(...ms.map((m) => m.rows.length));
+        aoa.push(lists.flatMap(() => [`RUN DATE ${md(w + 7)}`, '', '']), lists.flatMap(() => ['CSR', 'SLA 1ST RESPONSE', '']));
+        for (let r = 0; r < height; r++) aoa.push(ms.flatMap((m) => { const row = m.rows[r]; return row ? [row.c[0].v, xCell(row.c[wi + 1]), ''] : ['', '', '']; }));
+        aoa.push([]);
+      });
+      add('WEEKLY SLA', aoa, lists.flatMap(() => [{ wch: 16 }, { wch: 18 }, { wch: 3 }]));
+    }
+    const om = openModel(); add('Open cases', [om.cols.map((c) => c.x), ...bodyRows(om)], [{ wch: 24 }]);
+    aggregate(); const sm = summaryModel(false); add('Summary by person', [sm.cols.map((c) => c.x), ...bodyRows(sm)], [{ wch: 28 }]);
     const d = new Date(), pad = (n) => String(n).padStart(2, '0');
-    XLSX.writeFile(wb, `Case Count ${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}.xlsx`);
+    XLSX.writeFile(wb, `ACTIONED & CLOSED CASE COUNT ${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}.xlsx`);
   } catch (err) {
     $('#notice').hidden = false; $('#notice').textContent = err.message;
   } finally { btn.disabled = false; btn.textContent = label; }

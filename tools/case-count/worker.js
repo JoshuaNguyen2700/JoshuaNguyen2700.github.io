@@ -41,13 +41,156 @@ function htmlRows(text) {
 let sheetjs = false;
 function sheetRows(buf) {
   if (!sheetjs) { importScripts('/assets/vendor/xlsx.full.min.js'); sheetjs = true; }
-  const wb = XLSX.read(new Uint8Array(buf), { type: 'array', cellDates: false, dense: true });
-  // The first sheet that holds a report table wins (formatted exports put a title block above it).
+  const wb = XLSX.read(new Uint8Array(buf), { type: 'array', cellDates: false });
+  // The ACTIONED & CLOSED CASE COUNT workbook itself supplies the layout to mirror.
+  if (isTemplate(wb)) return { template: readTemplate(wb) };
+  // Otherwise the first sheet that holds a report table wins (formatted exports put a title block above it).
   for (const name of wb.SheetNames) {
     const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: true, defval: '', blankrows: false });
     if (findHeader(rows) >= 0) return rows;
   }
   return [];
+}
+
+// ---------- the workbook layout (sections, names, customer blocks, SLA lists) ----------
+// Only the layout is taken from the workbook: section and row names, which customer rows belong to
+// which rep, the WEEKLY SLA lists and the Open cases names. Its numbers are kept only to recognise
+// who is who (e.g. a nickname that isn't in Salesforce), on days the exports also cover.
+const MONTH_SHEET = /^(JAN|FEB|MAR|APR|MAY|JUNE?|JULY?|AUG|SEPT?|OCT|NOV|DEC)[A-Z]*\.?\s+(\d{4})$/i;
+const monthNo = (w) => ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'].indexOf(w.slice(0, 3).toUpperCase());
+const isTemplate = (wb) => wb.SheetNames.some((n) => MONTH_SHEET.test(n.trim())) && wb.SheetNames.some((n) => /^(WEEKLY\s*SLA|CUST\s*E-?MAILS)/i.test(n.trim()));
+function grid(ws) {
+  if (!ws || !ws['!ref']) return [];
+  const R = XLSX.utils.decode_range(ws['!ref']), out = [];
+  for (let r = 0; r <= R.e.r; r++) {
+    const row = [];
+    for (let c = 0; c <= R.e.c; c++) { const x = ws[XLSX.utils.encode_cell({ r, c })]; row.push(x ? { v: x.v, f: x.f } : null); }
+    out.push(row);
+  }
+  return out;
+}
+const txt = (c) => (c && typeof c.v === 'string' ? c.v.replace(/\s+/g, ' ').trim() : '');
+const isNum = (c) => c && typeof c.v === 'number';
+const serialDay = (v) => Math.round(v) - 25569;
+function readTemplate(wb) {
+  // Month tabs ("SEPT 2026"): a section name (GEORGE / KASEY), then CASES ACTIONED and CASES CLOSED
+  // blocks with a date header row and one row per person until TOTALS.
+  const months = [];
+  for (const name of wb.SheetNames) {
+    const m = MONTH_SHEET.exec(name.trim()); if (!m) continue;
+    const g = grid(wb.Sheets[name]), sections = [], rowMap = {};
+    let section = null;
+    const sec = (n) => { let s = sections.find((x) => x.name === n); if (!s) sections.push((s = { name: n, labels: [], hist: {} })); return s; };
+    for (let r = 0; r < g.length; r++) {
+      const a = txt(g[r][0]);
+      const kind = /^CASES ACTIONED/i.test(a) ? 'act' : /^CASES CLOSED/i.test(a) ? 'clo' : null;
+      if (kind) {
+        const cols = [];
+        g[r].forEach((c, ci) => { if (ci && isNum(c) && c.v > 40000) cols.push([ci, serialDay(c.v)]); });
+        const s = sec(section || 'TEAM');
+        let k = r + 1;
+        for (; k < g.length; k++) {
+          const l = txt(g[k][0]);
+          if (/^TOTALS?$/i.test(l) || /^CASES /i.test(l)) break;
+          if (!l) { if (g[k].some(isNum)) break; continue; }
+          if (!s.labels.includes(l)) s.labels.push(l);
+          const h = s.hist[l] || (s.hist[l] = { act: {}, clo: {} });
+          for (const [ci, d] of cols) if (isNum(g[k][ci])) h[kind][d] = g[k][ci].v;
+          rowMap[k + 1] = { section: s.name, label: l };
+        }
+        r = k;
+        continue;
+      }
+      if (a && !g[r].slice(1).some((c) => c && c.v !== '' && c.v != null) && !/^TOTAL/i.test(a)) section = a;
+    }
+    if (sections.length) months.push({ name: name.trim(), key: +m[2] * 12 + monthNo(m[1]), sections, rowMap });
+  }
+  months.sort((a, b) => a.key - b.key);
+  const latest = months[months.length - 1];
+  const byName = new Map(months.map((x) => [x.name.toUpperCase(), x]));
+  const hist = {};   // section|name -> { act: {day: n}, clo: {day: n} } from the last three month tabs
+  for (const mo of months.slice(-3)) for (const s of mo.sections) for (const [l, h] of Object.entries(s.hist)) {
+    const o = hist[s.name + '|' + l] || (hist[s.name + '|' + l] = { act: {}, clo: {} });
+    Object.assign(o.act, h.act); Object.assign(o.clo, h.clo);
+  }
+
+  // CUST E-MAILS (latest tab): a rep name, their customer rows, E-MAILS FROM CEVA STATIONS, TOTAL,
+  // E-MAILS ACTIONED (a formula pointing at the rep's rows on the month tab) and % ACTIONED. A row
+  // with dates beside its name (AMAZON MAILBOX) starts a mailbox block.
+  const custNames = wb.SheetNames.filter((n) => /^CUST\s*E-?MAILS/i.test(n.trim()));
+  const cust = [];
+  if (custNames.length) {
+    const g = grid(wb.Sheets[custNames[custNames.length - 1]]);
+    let cur = null;
+    const refOf = (row) => {
+      for (const c of row) {
+        if (!c || !c.f) continue;
+        const re = /(?:'([^']+)'|([A-Za-z0-9_]+(?: [0-9]{4})?))!\$?[A-Z]{1,3}\$?(\d+)/g; let m;
+        while ((m = re.exec(c.f))) {
+          const mo = byName.get((m[1] || m[2]).trim().toUpperCase()), hit = mo && mo.rowMap[+m[3]];
+          if (hit) return hit;
+        }
+      }
+      return null;
+    };
+    for (let r = 1; r < g.length; r++) {
+      const row = g[r], a = txt(row[0]), rest = row.slice(1);
+      if (/^CUSTOMER\s*\/\s*REP/i.test(a)) continue;
+      if (a && rest.some((c) => isNum(c) && c.v > 40000)) { cust.push((cur = { label: a, mailbox: true, customers: [a], ref: null, ceva: false, total: false, open: true })); continue; }
+      if (/^E-?MAILS FROM CEVA/i.test(a)) { if (cur) cur.ceva = true; continue; }
+      if (/^TOTALS?$/i.test(a)) { if (cur) cur.total = true; continue; }
+      if (/^E-?MAILS ACTIONED/i.test(a)) { if (cur) cur.ref = refOf(rest); continue; }
+      if (/^%\s*ACTIONED/i.test(a)) { if (cur) cur.open = false; continue; }
+      if (!a) continue;
+      if (!cur || !cur.open) cust.push((cur = { label: a, mailbox: false, customers: [], ref: null, ceva: false, total: false, open: true }));
+      else cur.customers.push(a);
+    }
+  }
+
+  // WEEKLY SLA: the name lists under the latest RUN DATE, with the title at the top of each column
+  const sla = [];
+  const slaName = wb.SheetNames.find((n) => /^WEEKLY\s*SLA/i.test(n.trim()));
+  if (slaName) {
+    const g = grid(wb.Sheets[slaName]), runRows = [];
+    g.forEach((row, r) => { if (row.some((c) => /^RUN DATE/i.test(txt(c)))) runRows.push(r); });
+    if (runRows.length) {
+      const first = runRows[0], last = runRows[runRows.length - 1];
+      g[last].forEach((c, ci) => {
+        if (!/^RUN DATE/i.test(txt(c))) return;
+        let title = '';
+        for (let r = 0; r < first && !title; r++) title = txt(g[r][ci]);
+        const labels = [];
+        for (let r = last + 1; r < g.length; r++) {
+          const l = txt(g[r][ci]);
+          if (/^CSR$/i.test(l)) continue;
+          if (!l || /^TEAM AVERAGE/i.test(l)) break;
+          labels.push(l);
+        }
+        sla.push({ title, labels });
+      });
+    }
+  }
+
+  // Open cases: names down column A, statuses across row 1
+  let open = null;
+  const openName = wb.SheetNames.find((n) => /^open cases$/i.test(n.trim()));
+  if (openName) {
+    const g = grid(wb.Sheets[openName]), statuses = [], names = [];
+    for (let c = 1; c < (g[0] || []).length; c++) { const h = txt(g[0][c]); if (!h || /^total/i.test(h)) break; statuses.push(h); }
+    for (let r = 1; r < g.length; r++) { const l = txt(g[r][0]); if (!l) continue; if (/^totals?/i.test(l)) break; names.push(l); }
+    open = { statuses, names };
+  }
+
+  // Optional ROSTER tab: A = name in the workbook, B = Salesforce name, C = section (optional)
+  const roster = [];
+  const rosterName = wb.SheetNames.find((n) => /^roster$/i.test(n.trim()));
+  if (rosterName) for (const row of grid(wb.Sheets[rosterName])) {
+    const a = txt(row[0]), b = txt(row[1]);
+    if (a && b && !/salesforce/i.test(b)) roster.push({ label: a, name: b, section: txt(row[2]) });
+  }
+
+  return { month: latest ? latest.name : null, sections: latest ? latest.sections.map((s) => ({ name: s.name, labels: s.labels })) : [],
+    hist, cust: cust.map(({ open: _, ...b }) => b), sla, open, roster };
 }
 async function readRows(file) {
   const buf = await file.arrayBuffer();
@@ -116,6 +259,7 @@ function kindOf(h, rows) {
 // ---------- build ----------
 async function build(items) {
   const files = [];
+  let template = null;
   // Phase 1: read every file and keep only the fields we need, keyed so overlapping exports count once.
   // Within one file a key can repeat (two emails in the same minute); across files the larger count wins.
   const K = { sent: new Map(), received: new Map(), closed: new Map(), sla: new Map() };
@@ -131,7 +275,16 @@ async function build(items) {
     progress({ file: path || name, pct: 10, stage: 'Reading' });
     let rows;
     try { rows = await readRows(file); }
-    catch (err) { info.note = 'Could not be read'; progress({ file: path || name, pct: 100, stage: info.note, skipped: true }); continue; }
+    catch (err) {
+      info.note = /\.xls[xm]$/i.test(name) ? 'Could not be read (if it is open in Excel, close it and load again)' : 'Could not be read';
+      progress({ file: path || name, pct: 100, stage: info.note, skipped: true }); continue;
+    }
+    if (rows && rows.template) {
+      info.kind = 'workbook'; template = rows.template;
+      info.note = template.month ? `Layout from ${template.month}` : 'No month tab found';
+      progress({ file: path || name, pct: 100, stage: 'Workbook layout' });
+      continue;
+    }
     const hi = findHeader(rows);
     if (hi < 0) { info.note = 'Not a Salesforce case or email report'; progress({ file: path || name, pct: 100, stage: info.note, skipped: true }); continue; }
     const head = rows[hi].map((x) => norm(x).toLowerCase()), H = new Map();
@@ -169,7 +322,7 @@ async function build(items) {
     merge(kind, local);
     progress({ file: path || name, pct: 100, rows: info.rows, kind });
   }
-  if (!files.some((f) => f.kind)) throw new Error('None of these files look like Salesforce case or email reports. Choose the .xls exports from the Cview Report folders.');
+  if (!files.some((f) => f.kind && f.kind !== 'workbook')) throw new Error('None of these files look like Salesforce case or email reports. Choose the .xls exports from the Cview Report folders.');
 
   // Phase 2: who owns each case, and which team each person belongs to.
   const caseOwner = new Map();
@@ -223,5 +376,6 @@ async function build(items) {
     teams, people: names.map((k) => people.get(k).name), companies: comps, statuses: stats,
     act: flat(act), clo: flat(clo), inb: flat(inb), sla: flat(sla), open: flat(open),
     files: files.map((f) => ({ name: f.path, team: f.team, kind: f.kind, rows: f.rows, from: f.from, to: f.to, note: f.note })),
+    template,
   };
 }

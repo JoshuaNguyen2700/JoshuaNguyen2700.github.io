@@ -18,7 +18,7 @@
   <section class="hero cc-start" id="start">
     <div class="eyebrow">Upload this week's Salesforce exports</div>
     <h1>Case Count</h1>
-    <p>Cases actioned and closed, customer emails and SLA first response by person. Choose the Cview Report folder to load every team at once.</p>
+    <p>Your ACTIONED &amp; CLOSED CASE COUNT tabs, filled from the Salesforce exports. Choose the Cview Report folder (with the workbook in it, closed in Excel) to load everything at once.</p>
     <div class="actions">
       <label class="btn" for="folderInput">Choose folder</label>
       <label class="link" for="filesInput">Choose files</label>
@@ -71,15 +71,9 @@
       </div>
     </section>
 
-    <nav class="cc-tabs" role="tablist" aria-label="Reports">
-      <button class="tab" role="tab" id="tab-over" data-tab="over">Overview</button>
-      <button class="tab" role="tab" id="tab-ac" data-tab="ac">Actioned &amp; closed</button>
-      <button class="tab" role="tab" id="tab-cust" data-tab="cust">Customer emails</button>
-      <button class="tab" role="tab" id="tab-sla" data-tab="sla">SLA</button>
-      <button class="tab" role="tab" id="tab-about" data-tab="about">How it's calculated</button>
-    </nav>
+    <nav class="cc-tabs" role="tablist" aria-label="Sheets" id="tabs"></nav>
 
-    <section class="panel" id="p-over" role="tabpanel" aria-labelledby="tab-over">
+    <section class="panel" id="p-over" role="tabpanel" hidden>
       <div class="tiles-k" id="tiles"></div>
       <div class="card">
         <div class="card-h"><h2>Emails received and worked per day</h2><span class="sub">worked = emails actioned + cases closed</span></div>
@@ -96,43 +90,22 @@
       </div>
     </section>
 
-    <section class="panel" id="p-ac" role="tabpanel" aria-labelledby="tab-ac" hidden>
-      <div class="card">
-        <div class="card-h"><h2>Cases actioned</h2><span class="sub">emails sent on each person's cases, by day; opens at the newest day</span><button class="cc-linkbtn copybtn" type="button" data-copy="#mAct" title="Copy this table, then paste into Excel">Copy</button></div>
-        <div class="tscroll" id="mAct"></div>
-      </div>
-      <div class="card">
-        <div class="card-h"><h2>Cases closed</h2><span class="sub">by the day the case was closed</span><button class="cc-linkbtn copybtn" type="button" data-copy="#mClo" title="Copy this table, then paste into Excel">Copy</button></div>
-        <div class="tscroll" id="mClo"></div>
-      </div>
-    </section>
+    <!-- Tabs that mirror the workbook; filled in tool.js -->
+    <section class="panel" id="p-month" role="tabpanel" hidden></section>
+    <section class="panel" id="p-cust" role="tabpanel" hidden></section>
+    <section class="panel" id="p-wsla" role="tabpanel" hidden></section>
+    <section class="panel" id="p-open" role="tabpanel" hidden></section>
 
-    <section class="panel" id="p-cust" role="tabpanel" aria-labelledby="tab-cust" hidden>
+    <section class="panel" id="p-names" role="tabpanel" hidden>
       <div class="card">
-        <div class="card-h"><h2 id="pctTitle">% actioned by person and day</h2><span class="sub">goal 85%</span><button class="cc-linkbtn copybtn" type="button" data-copy="#mPct" title="Copy this table, then paste into Excel">Copy</button></div>
-        <div class="tools"><div class="seg" id="pctMetric"></div><span class="note">% actioned = (emails actioned + cases closed) ÷ emails received. Red = under the 85% goal.</span></div>
-        <div class="tscroll" id="mPct"></div>
+        <div class="card-h"><h2>Names</h2><span class="sub">workbook name → Salesforce case owner</span></div>
+        <p class="note" id="namesNote"></p>
+        <div class="tscroll" id="tNames"></div>
       </div>
       <div class="card">
-        <div class="card-h"><h2 id="custTitle">Emails received by customer</h2><span class="sub" id="custSub"></span><button class="cc-linkbtn copybtn" type="button" data-copy="#mCust" title="Copy this table, then paste into Excel">Copy</button></div>
-        <div class="tools"><input type="search" id="custSearch" placeholder="Search customer" aria-label="Search customer"><span class="note">Pick a person above to see their customers, as in the CUST E-MAILS tabs.</span></div>
-        <div class="tscroll" id="mCust"></div>
+        <div class="card-h"><h2>Customer rows</h2><span class="sub">CUST E-MAILS row → Salesforce companies counted</span></div>
+        <div class="tscroll" id="tCustMap"></div>
       </div>
-    </section>
-
-    <section class="panel" id="p-sla" role="tabpanel" aria-labelledby="tab-sla" hidden>
-      <div class="card">
-        <div class="card-h"><h2 id="slaTitle">SLA first response by person and week</h2><span class="sub">by the week the case was opened</span><button class="cc-linkbtn copybtn" type="button" data-copy="#mSla" title="Copy this table, then paste into Excel">Copy</button></div>
-        <div class="tools"><div class="seg" id="slaMetric"></div><span class="note" id="slaNote"></span></div>
-        <div class="tscroll" id="mSla"></div>
-      </div>
-      <div class="card">
-        <div class="card-h"><h2>Open cases by status</h2><span class="sub">cases in the SLA export that aren't closed</span><button class="cc-linkbtn copybtn" type="button" data-copy="#tOpen" title="Copy this table, then paste into Excel">Copy</button></div>
-        <div class="tscroll" id="tOpen"></div>
-      </div>
-    </section>
-
-    <section class="panel" id="p-about" role="tabpanel" aria-labelledby="tab-about" hidden>
       <div class="card about" id="about"></div>
       <div class="card">
         <div class="card-h"><h2>Files loaded</h2><span class="sub">report type is recognised from each file's columns</span></div>
