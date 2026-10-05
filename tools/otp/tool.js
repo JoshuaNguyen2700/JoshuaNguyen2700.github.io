@@ -78,6 +78,9 @@ const regionLabel = (n) => REGION_NAMES[n] || n;
 // These regions number weeks the ISO way, like their OTP summary workbooks: week 1 is the full
 // Monday-Sunday week containing Jan 1 (in 2026, Dec 29 - Jan 4) instead of Excel's split W53/W1.
 const ISO_WEEK_REGIONS = ['COSTCO+', 'AMAZON'];
+// CSR volume split while the CSRs shared accounts: for ship weeks before 2026 W41, 1/3 of Jesus Quiroga's
+// COSTCO+ shipments count for Mindy Wilson. Applied to CSR shipment volume only.
+const CSR_SPLITS = [{ region: 'COSTCO+', from: 'Jesus Quiroga', to: 'Mindy Wilson', share: 1 / 3, beforeWeek: 202641 }];
 function isoWeekKey(y, w) {   // Excel WEEKNUM(,2) year/week -> ISO year*100+week (weeks start Monday in both)
   const jan1 = Date.UTC(y, 0, 1), start = jan1 - ((new Date(jan1).getUTCDay() + 6) % 7) * DAY + 7 * (w - 1) * DAY;
   const thu = new Date(start + 3 * DAY), iy = thu.getUTCFullYear();
@@ -527,10 +530,28 @@ function segControl(sel, key) {
   el.onclick = (e) => { const b = e.target.closest('button'); if (!b) return; S[key] = b.dataset.v; saveState(); render(); };
 }
 
+// Ship rows for CSR volume views, with CSR_SPLITS applied.
+function csrShipRows() {
+  const rules = CSR_SPLITS.map((x) => ({ ...x, region: dims.region.indexOf(x.region), from: dims.csr.indexOf(x.from), to: dims.csr.indexOf(x.to) }))
+    .filter((x) => x.region >= 0 && x.from >= 0 && x.to >= 0);
+  if (!rules.length) return A.shipRows;
+  const out = [];
+  for (const r of A.shipRows) {
+    const rule = rules.find((x) => x.region === r[0] && x.from === r[3] && r.wk < x.beforeWeek);
+    if (!rule) { out.push(r); continue; }
+    const keep = r.slice(), give = r.slice();
+    keep[7] = r[7] * (1 - rule.share); give[3] = rule.to; give[7] = r[7] * rule.share;
+    for (const x of [keep, give]) { x.ym = r.ym; x.wk = r.wk; }
+    out.push(keep, give);
+  }
+  return out;
+}
+
 function csrTable() {
   const m = new Map();
   const get = (k) => { let o = m.get(k); if (!o) m.set(k, (o = { s: 0, h: 0, gl: 0, nl: 0, cust: new Set() })); return o; };
-  for (const r of A.shipRows) { const o = get(r[3]); o.s += r[7]; o.cust.add(r[1]); }
+  for (const r of A.shipRows) get(r[3]).cust.add(r[1]);
+  for (const r of csrShipRows()) get(r[3]).s += r[7];
   for (const r of A.podRows) { const o = get(r[3]); o.h += r[7]; o.gl += r[8]; o.nl += r[9]; o.cust.add(r[1]); }
   const keys = [...m.keys()].sort(byName(dims.csr));
   if (!keys.length) { $('#tCsr').innerHTML = emptyMsg('No data for these filters.'); return; }
@@ -906,7 +927,7 @@ async function exportExcel() {
     add('Ship Volume by Month', volumeBlock(A.shipRows, 1, 'month', 'Customer'));
     add('OTP by Month', otpBlock(A.podRows, 1, 'month', 'CUSTOMER'));
     add('Ship Vol CSR', stackBlocks([
-      ['BY MONTH', volumeBlock(A.shipRows, 3, 'month', 'CSR')], ['BY WEEK', volumeBlock(A.shipRows, 3, 'week', 'CSR')]]), 26);
+      ['BY MONTH', volumeBlock(csrShipRows(), 3, 'month', 'CSR')], ['BY WEEK', volumeBlock(csrShipRows(), 3, 'week', 'CSR')]]), 26);
     add('OTP by CSR', stackBlocks([['BY MONTH', otpBlock(A.podRows, 3, 'month', 'CSR')], ['BY WEEK', otpBlock(A.podRows, 3, 'week', 'CSR')]]), 26);
     // dashboard tables
     const wkKeys = sortedKeys(A.podW), multi = multiYear(wkKeys);
@@ -1362,7 +1383,7 @@ async function exportPpt() {
     {
       const m = new Map();
       const get = (k) => { let o = m.get(k); if (!o) m.set(k, (o = { s: 0, h: 0, gl: 0, nl: 0 })); return o; };
-      for (const r of A.shipRows) get(r[3]).s += r[7];
+      for (const r of csrShipRows()) get(r[3]).s += r[7];
       for (const r of A.podRows) { const o = get(r[3]); o.h += r[7]; o.gl += r[8]; o.nl += r[9]; }
       const keys = [...m.keys()].sort((a, b) => m.get(b).s - m.get(a).s);
       if (keys.length) {
@@ -1445,7 +1466,7 @@ function render() {
     $('#csrShipTitle').textContent = `HAWB count by CSR and ship ${byMonth ? 'month' : 'week'}`;
     $('#csrShipSub').textContent = byMonth ? 'calendar months' : 'opens at the newest week';
     csrTable();
-    matrix('#mCsrShip', null, A.shipRows, 3, 'count', { period: S.csrPer });
+    matrix('#mCsrShip', null, csrShipRows(), 3, 'count', { period: S.csrPer });
     segControl('#csrMetric', 'csrMetric');
     matrix('#mCsrOtp', null, A.podRows, 3, 'otp', { metric: S.csrMetric });
   }
