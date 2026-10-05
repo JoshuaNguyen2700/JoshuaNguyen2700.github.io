@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Case Count · Joshua Nguyen</title>
+<meta name="description" content="Cases actioned and closed, customer emails and SLA first response by person, read straight from your Salesforce report exports. Files stay on your computer.">
+<!-- Shared bus: absolute paths. This tool's own files: relative paths. -->
+<link rel="stylesheet" href="/assets/bus.css">
+<script src="/assets/core/theme.js"></script>
+<link rel="stylesheet" href="tool.css">
+</head>
+<body>
+<header data-shell="nav"></header>
+
+<main>
+  <!-- Shown until files are opened. No case data is ever stored in this website. -->
+  <section class="hero cc-start" id="start">
+    <div class="eyebrow">Upload this week's Salesforce exports</div>
+    <h1>Case Count</h1>
+    <p>Cases actioned and closed, customer emails and SLA first response by person. Choose the Cview Report folder to load every team at once.</p>
+    <div class="actions">
+      <label class="btn" for="folderInput">Choose folder</label>
+      <label class="link" for="filesInput">Choose files</label>
+    </div>
+    <div class="cc-drop" id="drop">or drop the folder or the .xls reports here. Each team folder (US East, US West, Legacy, …) becomes a team.</div>
+    <p class="cc-privacy">Your files stay on this computer. The browser reads them directly and nothing is sent anywhere.</p>
+    <p class="cc-error" id="startError" role="alert" hidden></p>
+  </section>
+
+  <!-- Progress while the reports are read -->
+  <section class="cc-progress" id="progress" hidden aria-live="polite">
+    <h2>Reading your files</h2>
+    <p class="sub" id="progressCount"></p>
+    <ul id="progressList"></ul>
+    <button class="cc-linkbtn" id="cancelBtn" type="button">Cancel</button>
+  </section>
+  <input type="file" id="folderInput" webkitdirectory multiple hidden>
+  <input type="file" id="filesInput" accept=".xls,.xlsx,.csv" multiple hidden>
+
+  <div class="cc" id="app" hidden>
+    <header class="cc-head">
+      <div>
+        <div class="eyebrow" id="eyebrow">Cases &amp; emails</div>
+        <h1>Case Count</h1>
+        <div class="cc-range" id="range"></div>
+      </div>
+      <div class="cc-meta">
+        <div id="meta"></div>
+        <div class="cc-meta-actions">
+          <button class="cc-btn cc-btn-primary" id="exportBtn" type="button" title="Download every table for the current filters as an Excel workbook">Export to Excel</button>
+          <label class="cc-btn" for="folderInput">Load new folder</label>
+          <label class="cc-linkbtn" for="filesInput">Load files</label>
+          <button class="cc-linkbtn" id="closeBtn" type="button">Close data</button>
+        </div>
+      </div>
+    </header>
+    <p class="cc-banner" role="note"><span><b>Data is not saved.</b> Refreshing or closing this page clears it; load the folder again to bring it back.</span></p>
+    <p class="cc-notice" id="notice" hidden></p>
+
+    <section class="cc-filters" aria-label="Filters">
+      <div class="frow">
+        <span class="eyebrow">Team</span>
+        <div class="chips" id="teamChips"></div>
+        <button class="cc-linkbtn" id="resetBtn" type="button">Reset filters</button>
+      </div>
+      <div class="frow">
+        <div class="field"><label for="fPerson">Person</label><select id="fPerson"></select></div>
+        <div class="field"><label for="fFrom">From</label><input type="date" id="fFrom"></div>
+        <div class="field"><label for="fTo">To</label><input type="date" id="fTo"></div>
+      </div>
+    </section>
+
+    <nav class="cc-tabs" role="tablist" aria-label="Reports">
+      <button class="tab" role="tab" id="tab-over" data-tab="over">Overview</button>
+      <button class="tab" role="tab" id="tab-ac" data-tab="ac">Actioned &amp; closed</button>
+      <button class="tab" role="tab" id="tab-cust" data-tab="cust">Customer emails</button>
+      <button class="tab" role="tab" id="tab-sla" data-tab="sla">SLA</button>
+      <button class="tab" role="tab" id="tab-about" data-tab="about">How it's calculated</button>
+    </nav>
+
+    <section class="panel" id="p-over" role="tabpanel" aria-labelledby="tab-over">
+      <div class="tiles-k" id="tiles"></div>
+      <div class="card">
+        <div class="card-h"><h2>Emails received and worked per day</h2><span class="sub">worked = emails actioned + cases closed</span></div>
+        <div class="legend"><span><i style="background:var(--s1)"></i>Emails received</span><span><i style="background:var(--s3)"></i>Actioned + closed</span></div>
+        <div class="chart" id="cDaily"></div>
+      </div>
+      <div class="card">
+        <div class="card-h"><h2>By team</h2><span class="sub">in the selected dates</span><button class="cc-linkbtn copybtn" type="button" data-copy="#tTeam" title="Copy this table, then paste into Excel">Copy</button></div>
+        <div class="tscroll" id="tTeam"></div>
+      </div>
+      <div class="card">
+        <div class="card-h"><h2>By person</h2><span class="sub">grouped by team, A to Z</span><button class="cc-linkbtn copybtn" type="button" data-copy="#tPerson" title="Copy this table, then paste into Excel">Copy</button></div>
+        <div class="tscroll" id="tPerson"></div>
+      </div>
+    </section>
+
+    <section class="panel" id="p-ac" role="tabpanel" aria-labelledby="tab-ac" hidden>
+      <div class="card">
+        <div class="card-h"><h2>Cases actioned</h2><span class="sub">emails sent on each person's cases, by day; opens at the newest day</span><button class="cc-linkbtn copybtn" type="button" data-copy="#mAct" title="Copy this table, then paste into Excel">Copy</button></div>
+        <div class="tscroll" id="mAct"></div>
+      </div>
+      <div class="card">
+        <div class="card-h"><h2>Cases closed</h2><span class="sub">by the day the case was closed</span><button class="cc-linkbtn copybtn" type="button" data-copy="#mClo" title="Copy this table, then paste into Excel">Copy</button></div>
+        <div class="tscroll" id="mClo"></div>
+      </div>
+    </section>
+
+    <section class="panel" id="p-cust" role="tabpanel" aria-labelledby="tab-cust" hidden>
+      <div class="card">
+        <div class="card-h"><h2 id="pctTitle">% actioned by person and day</h2><span class="sub">goal 85%</span><button class="cc-linkbtn copybtn" type="button" data-copy="#mPct" title="Copy this table, then paste into Excel">Copy</button></div>
+        <div class="tools"><div class="seg" id="pctMetric"></div><span class="note">% actioned = (emails actioned + cases closed) ÷ emails received. Red = under the 85% goal.</span></div>
+        <div class="tscroll" id="mPct"></div>
+      </div>
+      <div class="card">
+        <div class="card-h"><h2 id="custTitle">Emails received by customer</h2><span class="sub" id="custSub"></span><button class="cc-linkbtn copybtn" type="button" data-copy="#mCust" title="Copy this table, then paste into Excel">Copy</button></div>
+        <div class="tools"><input type="search" id="custSearch" placeholder="Search customer" aria-label="Search customer"><span class="note">Pick a person above to see their customers, as in the CUST E-MAILS tabs.</span></div>
+        <div class="tscroll" id="mCust"></div>
+      </div>
+    </section>
+
+    <section class="panel" id="p-sla" role="tabpanel" aria-labelledby="tab-sla" hidden>
+      <div class="card">
+        <div class="card-h"><h2 id="slaTitle">SLA first response by person and week</h2><span class="sub">by the week the case was opened</span><button class="cc-linkbtn copybtn" type="button" data-copy="#mSla" title="Copy this table, then paste into Excel">Copy</button></div>
+        <div class="tools"><div class="seg" id="slaMetric"></div><span class="note" id="slaNote"></span></div>
+        <div class="tscroll" id="mSla"></div>
+      </div>
+      <div class="card">
+        <div class="card-h"><h2>Open cases by status</h2><span class="sub">cases in the SLA export that aren't closed</span><button class="cc-linkbtn copybtn" type="button" data-copy="#tOpen" title="Copy this table, then paste into Excel">Copy</button></div>
+        <div class="tscroll" id="tOpen"></div>
+      </div>
+    </section>
+
+    <section class="panel" id="p-about" role="tabpanel" aria-labelledby="tab-about" hidden>
+      <div class="card about" id="about"></div>
+      <div class="card">
+        <div class="card-h"><h2>Files loaded</h2><span class="sub">report type is recognised from each file's columns</span></div>
+        <div class="tscroll" id="tFiles"></div>
+      </div>
+    </section>
+  </div>
+</main>
+<div id="tip" hidden></div>
+
+<footer data-shell="footer"></footer>
+<script type="module" src="/assets/core/shell.js"></script>
+<script type="module" src="tool.js"></script>
+</body>
+</html>
