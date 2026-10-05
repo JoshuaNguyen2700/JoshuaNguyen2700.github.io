@@ -58,7 +58,7 @@ const byName = (names) => (a, b) => {
 };
 
 const defaults = () => ({ regions: Array.from({ length: NR }, (_, i) => i), account: -1, csr: -1, cust: -1,
-  from: months[0], to: months[months.length - 1], tab: 'dash', otpMetric: 'gross', csrMetric: 'gross', csrVol: 'adj', csrPer: 'week', fcH: 8, fcBasis: 12, revOn: true });
+  from: months[0], to: months[months.length - 1], tab: 'dash', otpMetric: 'gross', csrMetric: 'gross', csrPer: 'week', fcH: 8, fcBasis: 12, revOn: true });
 // Revenue can be hidden everywhere (screens and exports), e.g. when sharing the screen.
 const showRev = () => S.revOn !== false;
 function revUi() { $('#revBtn').textContent = showRev() ? 'Hide revenue' : 'Show revenue'; }
@@ -78,9 +78,6 @@ const regionLabel = (n) => REGION_NAMES[n] || n;
 // These regions number weeks the ISO way, like their OTP summary workbooks: week 1 is the full
 // Monday-Sunday week containing Jan 1 (in 2026, Dec 29 - Jan 4) instead of Excel's split W53/W1.
 const ISO_WEEK_REGIONS = ['COSTCO+', 'AMAZON'];
-// "Adjusted" CSR shipment volume, from the Costco OTP summary's BY WEEK / BY MONTH ADJUSTED tables:
-// Jesus Quiroga keeps 2/3 of his COSTCO+ shipments and 1/3 is credited to Mindy Wilson.
-const CSR_SPLITS = [{ region: 'COSTCO+', from: 'Jesus Quiroga', to: 'Mindy Wilson', share: 1 / 3 }];
 function isoWeekKey(y, w) {   // Excel WEEKNUM(,2) year/week -> ISO year*100+week (weeks start Monday in both)
   const jan1 = Date.UTC(y, 0, 1), start = jan1 - ((new Date(jan1).getUTCDay() + 6) % 7) * DAY + 7 * (w - 1) * DAY;
   const thu = new Date(start + 3 * DAY), iy = thu.getUTCFullYear();
@@ -507,7 +504,6 @@ function matrix(target, moreTarget, facts, col, mode, opts = {}) {
     if (!c || !c.h) { hideTip(); return; }
     const per = byMonth ? (mode === 'count' ? 'Ship month' : 'POD month') : (mode === 'count' ? 'Ship week' : 'POD week');
     let body = `<div class="tt">${esc(title)}</div>` + row(wk == null ? 'Period' : per, wk == null ? 'Total' : byMonth ? ymLabel(wk) : wkLabel(wk, true)) + row('HAWBs', fmtN(c.h));
-    if (opts.adjusted && !tr.classList.contains('total') && opts.adjusted.has(+tr.dataset.k)) body += '<div class="tnote">Adjusted volume (Jesus Quiroga ⅓ → Mindy Wilson)</div>';
     if (mode !== 'count') body += row('Gross late', fmtN(c.gl)) + row('Net late', fmtN(c.nl)) + row('On-time gross', fmtP(1 - c.gl / c.h)) + row('On-time net', fmtP(1 - c.nl / c.h, 2));
     if (wk != null && !byMonth) body += partNote(wk);
     showTip(body, ev);
@@ -531,35 +527,15 @@ function segControl(sel, key) {
   el.onclick = (e) => { const b = e.target.closest('button'); if (!b) return; S[key] = b.dataset.v; saveState(); render(); };
 }
 
-// Ship rows with the CSR volume split applied (only CSR views use this; totals are unchanged).
-// Returns the rows and the set of CSR ids whose volume changed.
-function csrShipRows(mode = S.csrVol) {
-  if (mode !== 'adj') return { rows: A.shipRows, touched: new Set() };
-  const rules = CSR_SPLITS.map((x) => ({ region: dims.region.indexOf(x.region), from: dims.csr.indexOf(x.from), to: dims.csr.indexOf(x.to), share: x.share }))
-    .filter((x) => x.region >= 0 && x.from >= 0 && x.to >= 0);
-  if (!rules.length) return { rows: A.shipRows, touched: new Set() };
-  const out = [], touched = new Set();
-  for (const r of A.shipRows) {
-    const rule = rules.find((x) => x.region === r[0] && x.from === r[3]);
-    if (!rule) { out.push(r); continue; }
-    const keep = r.slice(), give = r.slice();
-    keep[7] = r[7] * (1 - rule.share); give[3] = rule.to; give[7] = r[7] * rule.share;
-    for (const x of [keep, give]) { x.ym = r.ym; x.wk = r.wk; }
-    out.push(keep, give); touched.add(rule.from); touched.add(rule.to);
-  }
-  return { rows: out, touched };
-}
-
-function csrTable(ship) {
+function csrTable() {
   const m = new Map();
   const get = (k) => { let o = m.get(k); if (!o) m.set(k, (o = { s: 0, h: 0, gl: 0, nl: 0, cust: new Set() })); return o; };
-  for (const r of A.shipRows) get(r[3]).cust.add(r[1]);
-  for (const r of ship.rows) get(r[3]).s += r[7];
+  for (const r of A.shipRows) { const o = get(r[3]); o.s += r[7]; o.cust.add(r[1]); }
   for (const r of A.podRows) { const o = get(r[3]); o.h += r[7]; o.gl += r[8]; o.nl += r[9]; o.cust.add(r[1]); }
   const keys = [...m.keys()].sort(byName(dims.csr));
   if (!keys.length) { $('#tCsr').innerHTML = emptyMsg('No data for these filters.'); return; }
   $('#tCsr').innerHTML = `<table><thead><tr><th>CSR</th><th>Customers</th><th>Shipped</th><th>Delivered</th><th>Gross late</th><th>Net late</th><th>On-time gross</th><th>On-time net</th></tr></thead><tbody>` +
-    keys.map((k) => { const o = m.get(k); return `<tr><td>${esc(dims.csr[k])}${ship.touched.has(k) ? '<span class="rtag">adjusted</span>' : ''}</td><td>${o.cust.size}</td><td>${fmtN(o.s)}</td><td>${fmtN(o.h)}</td><td>${fmtN(o.gl)}</td><td>${fmtN(o.nl)}</td><td>${fmtP(o.h ? 1 - o.gl / o.h : null)}</td><td>${fmtP(o.h ? 1 - o.nl / o.h : null, 2)}</td></tr>`; }).join('') +
+    keys.map((k) => { const o = m.get(k); return `<tr><td>${esc(dims.csr[k])}</td><td>${o.cust.size}</td><td>${fmtN(o.s)}</td><td>${fmtN(o.h)}</td><td>${fmtN(o.gl)}</td><td>${fmtN(o.nl)}</td><td>${fmtP(o.h ? 1 - o.gl / o.h : null)}</td><td>${fmtP(o.h ? 1 - o.nl / o.h : null, 2)}</td></tr>`; }).join('') +
     '</tbody></table>';
 }
 
@@ -604,7 +580,6 @@ function about() {
       <li><b>Gross late</b> = every late HAWB. <b>Net late</b> = late HAWBs whose defect code is <i>Controllable</i> in the “delay codes in WP” table.</li>
       <li><b>Weeks</b> follow <code>WEEKNUM(date, 2)</code> (weeks start Monday) and are kept apart by year, so W50 ’25 sorts before W1 ’26.
         <b>COSTCO+ and AMAZON</b> use ISO weeks, like their OTP summaries: week 1 is the full week containing Jan 1, so Dec 29, 2025 – Jan 4, 2026 is W1 ’26 for those regions.</li>
-      <li><b>Adjusted CSR volume</b> (CSR tab) follows the Costco OTP summary: Jesus Quiroga keeps 2/3 of his COSTCO+ shipments and 1/3 is credited to Mindy Wilson. Switch to Raw to see shipments as recorded.</li>
       <li><b>CSR and Account</b> come from the value on each row, which keeps CSR history. Rows without a value use the CSR tab lookup.</li>
       <li>Delivery views (OTP, delay codes, revenue) filter by POD month; shipment counts filter by ship month, matching the Excel pivots.</li>
     </ul>
@@ -910,7 +885,6 @@ function filterLines() {
     ['RAW%', 'Gross on-time: delivered on or before the adjusted due date'],
     ['NET%', 'Net on-time: late shipments count against it only when the delay code is Controllable'],
     ['Weeks', `WEEKNUM(date, 2), weeks start Monday. ${ISO_WEEK_REGIONS.join(' and ')} use ISO weeks (Dec 29 – Jan 4 is WK1).`],
-    ['Adjusted CSR volume', 'Jesus Quiroga keeps 2/3 of his COSTCO+ shipments; 1/3 is credited to Mindy Wilson.'],
   ];
   return { aoa: lines, merges: [] };
 }
@@ -926,15 +900,13 @@ async function exportExcel() {
   try {
     const XLSX = await loadXlsx(), wb = XLSX.utils.book_new();
     const add = (name, block, w) => XLSX.utils.book_append_sheet(wb, sheetFrom(XLSX, block, w), name);
-    const raw = csrShipRows('raw').rows, adj = csrShipRows('adj').rows;
     add('Filters', filterLines(), 22);
     add('Ship Volume by Week', volumeBlock(A.shipRows, 1, 'week', 'Customer'));
     add('OTP by Week', otpBlock(A.podRows, 1, 'week', 'CUSTOMER'));
     add('Ship Volume by Month', volumeBlock(A.shipRows, 1, 'month', 'Customer'));
     add('OTP by Month', otpBlock(A.podRows, 1, 'month', 'CUSTOMER'));
     add('Ship Vol CSR', stackBlocks([
-      ['BY MONTH', volumeBlock(raw, 3, 'month', 'CSR')], ['BY MONTH ADJUSTED', volumeBlock(adj, 3, 'month', 'CSR')],
-      ['BY WEEK', volumeBlock(raw, 3, 'week', 'CSR')], ['BY WEEK ADJUSTED', volumeBlock(adj, 3, 'week', 'CSR')]]), 26);
+      ['BY MONTH', volumeBlock(A.shipRows, 3, 'month', 'CSR')], ['BY WEEK', volumeBlock(A.shipRows, 3, 'week', 'CSR')]]), 26);
     add('OTP by CSR', stackBlocks([['BY MONTH', otpBlock(A.podRows, 3, 'month', 'CSR')], ['BY WEEK', otpBlock(A.podRows, 3, 'week', 'CSR')]]), 26);
     // dashboard tables
     const wkKeys = sortedKeys(A.podW), multi = multiYear(wkKeys);
@@ -1388,16 +1360,15 @@ async function exportPpt() {
 
     // 10. CSR summary
     {
-      const ship = csrShipRows(), m = new Map();
+      const m = new Map();
       const get = (k) => { let o = m.get(k); if (!o) m.set(k, (o = { s: 0, h: 0, gl: 0, nl: 0 })); return o; };
-      for (const r of ship.rows) get(r[3]).s += r[7];
+      for (const r of A.shipRows) get(r[3]).s += r[7];
       for (const r of A.podRows) { const o = get(r[3]); o.h += r[7]; o.gl += r[8]; o.nl += r[9]; }
       const keys = [...m.keys()].sort((a, b) => m.get(b).s - m.get(a).s);
       if (keys.length) {
         const shown = keys.slice(0, 12), lead = m.get(keys[0]);
         const withPod = shown.filter((k) => m.get(k).h), nets = withPod.map((k) => 1 - m.get(k).nl / m.get(k).h);
-        const s = slide('Customer service', `${dims.csr[keys[0]]} handles the most volume (${fmtN(lead.s)} HAWBs); net on-time ranges from ${pctTxt(Math.min(...nets), 2)} to ${pctTxt(Math.max(...nets), 2)} across the largest CSRs`,
-          S.csrVol === 'adj' ? 'Volume adjusted: Jesus Quiroga keeps 2/3 of COSTCO+ shipments, 1/3 credited to Mindy Wilson.' : '');
+        const s = slide('Customer service', `${dims.csr[keys[0]]} handles the most volume (${fmtN(lead.s)} HAWBs); net on-time ranges from ${pctTxt(Math.min(...nets), 2)} to ${pctTxt(Math.max(...nets), 2)} across the largest CSRs`);
         exhibitHead(s, M, CW, 'CSR scorecard', `Top ${shown.length} of ${keys.length} by shipped volume`);
         table(s, [head(['CSR', 'Shipped', 'Delivered', 'Gross on-time', 'Net on-time', 'Controllable late']),
           ...shown.map((k) => { const o = m.get(k), nn2 = o.h ? 1 - o.nl / o.h : null; return [cell(dims.csr[k], { align: 'left', fontSize: 10 }), cell(fmtN(o.s), { fontSize: 10 }), cell(fmtN(o.h), { fontSize: 10 }),
@@ -1432,7 +1403,6 @@ async function exportPpt() {
         ['Gross on-time. ', 'Delivered on or before the adjusted due date: ship date plus SLA workdays, +1 day for each origin or destination zone outside A–E, excluding holidays.'],
         ['Net on-time. ', 'A late shipment counts against net on-time only when its delay code is Controllable.'],
         ['Weeks. ', 'Weeks start Monday (Excel WEEKNUM type 2). COSTCO+ and AMAZON use ISO weeks, so Dec 29 – Jan 4 is week 1 for them. The week in progress is excluded from weekly exhibits.'],
-        ['CSR volume. ', 'Adjusted view: Jesus Quiroga keeps 2/3 of his COSTCO+ shipments and 1/3 is credited to Mindy Wilson.'],
         ['Projections. ', 'Damped linear trend over the last 12 full weeks for volume; volume-weighted average for on-time %. Ranges cover about 8 in 10 weeks.'],
         ['Data. ', `${(DATA.sources || []).join(', ')}; built ${fmtBuilt(DATA.generated)}.`],
       ];
@@ -1470,16 +1440,12 @@ function render() {
   if (S.tab === 'otp') { segControl('#otpMetric', 'otpMetric'); matrix('#mOtp', '#mOtpMore', A.podRows, 1, 'otp', { metric: S.otpMetric, search: $('#otpSearch').value }); }
   if (S.tab === 'ship') { shipChart('#cShip2'); matrix('#mShip', '#mShipMore', A.shipRows, 1, 'count', { search: $('#shipSearch').value }); }
   if (S.tab === 'csr') {
-    choice('#csrVol', 'csrVol', [['adj', 'Adjusted'], ['raw', 'Raw']]);
     choice('#csrPer', 'csrPer', [['week', 'By week'], ['month', 'By month']]);
-    const ship = csrShipRows(), byMonth = S.csrPer === 'month';
-    $('#csrVolNote').textContent = S.csrVol === 'adj'
-      ? 'Adjusted, as in the Costco OTP summary: Jesus Quiroga keeps 2/3 of his COSTCO+ shipments and 1/3 is credited to Mindy Wilson. Delivered and on-time figures are not adjusted.'
-      : 'Raw: every shipment counts for the CSR on the shipment.';
-    $('#csrShipTitle').textContent = `HAWB count by CSR and ship ${byMonth ? 'month' : 'week'}${S.csrVol === 'adj' ? ' (adjusted)' : ''}`;
+    const byMonth = S.csrPer === 'month';
+    $('#csrShipTitle').textContent = `HAWB count by CSR and ship ${byMonth ? 'month' : 'week'}`;
     $('#csrShipSub').textContent = byMonth ? 'calendar months' : 'opens at the newest week';
-    csrTable(ship);
-    matrix('#mCsrShip', null, ship.rows, 3, 'count', { period: S.csrPer, adjusted: ship.touched });
+    csrTable();
+    matrix('#mCsrShip', null, A.shipRows, 3, 'count', { period: S.csrPer });
     segControl('#csrMetric', 'csrMetric');
     matrix('#mCsrOtp', null, A.podRows, 3, 'otp', { metric: S.csrMetric });
   }
