@@ -303,18 +303,18 @@ async function build(items) {
         span(day);
         // (status is left out of the key: a "Read" email becomes "Replied" in a later export)
         const key = [cn, norm(col(r, 'email message date')), norm(col(r, 'from name')), norm(col(r, 'email subject'))].join('\u0001');
-        if (kind === 'sent') add(key, { owner, day, folder: info.team });
-        else add(key, { owner, cn, day, folder: info.team, company: norm(col(r, 'company name')), ceva: isCevaMail(col(r, 'web email')) });
+        if (kind === 'sent') add(key, { owner, day, folder: info.team, fi: files.length - 1 });
+        else add(key, { owner, cn, day, folder: info.team, fi: files.length - 1, company: norm(col(r, 'company name')), ceva: isCevaMail(col(r, 'web email')) });
       } else if (kind === 'closed') {
         const day = dayOf(col(r, 'date/time closed')); if (day == null) continue;
         span(day);
-        add(cn + '\u0001' + norm(col(r, 'date/time closed')), { owner, cn, day, folder: info.team });
+        add(cn + '\u0001' + norm(col(r, 'date/time closed')), { owner, cn, day, folder: info.team, fi: files.length - 1 });
       } else {
         const opened = dayOf(col(r, 'date/time opened'));
         span(opened);
         const br = norm(col(r, 'sla breached?')).toLowerCase(), vio = norm(col(r, 'violation'));
         const met = /met/.test(br) ? 1 : /breach/.test(br) ? 0 : vio === '0' ? 1 : vio === '1' ? 0 : null;
-        local.set(cn, { owner, cn, opened, folder: info.team, branch: norm(col(r, 'branch code')),
+        local.set(cn, { owner, cn, opened, folder: info.team, fi: files.length - 1, branch: norm(col(r, 'branch code')),
           elapsed: num(col(r, 'elapsed time (mins)')), met, status: norm(col(r, 'status')), n: 1 });
       }
     }
@@ -356,7 +356,12 @@ async function build(items) {
   const names = [], pIdx = new Map(), P = (k) => { if (!k) return -1; if (!pIdx.has(k)) { pIdx.set(k, names.length); names.push(k); } return pIdx.get(k); };
   const comps = [], cIdx = new Map(), C = (c) => { c = c || '(no company)'; if (!cIdx.has(c)) { cIdx.set(c, comps.length); comps.push(c); } return cIdx.get(c); };
   const stats = [], sIdx = new Map(), ST = (s) => { if (!sIdx.has(s)) { sIdx.set(s, stats.length); stats.push(s); } return sIdx.get(s); };
-  const teamFor = (v) => T(v.pk ? home.get(v.pk) : v.team);
+  // A file picked on its own (no team folder in its path) takes the team most of its case owners belong to,
+  // so emails on cases with no known owner still land in the right team.
+  const fileVotes = files.map(() => new Map());
+  for (const kind of ['sent', 'closed', 'received', 'sla']) for (const v of K[kind].values()) if (v.pk && v.fi != null) { const m = fileVotes[v.fi], h = home.get(v.pk); m.set(h, (m.get(h) || 0) + v.n); }
+  files.forEach((f, i) => { if (!f.team && f.kind && f.kind !== 'workbook') { const best = [...fileVotes[i]].sort((a, b) => b[1] - a[1])[0]; if (best) f.team = best[0]; } });
+  const teamFor = (v) => T(v.pk ? home.get(v.pk) : v.team || (v.fi != null && files[v.fi].team) || null);
   const tally = (map, key, n) => map.set(key, (map.get(key) || 0) + n);
   const act = new Map(), clo = new Map(), inb = new Map(), sla = new Map(), open = new Map();
   for (const v of K.sent.values()) tally(act, [teamFor(v), P(v.pk), v.day].join(), v.n);

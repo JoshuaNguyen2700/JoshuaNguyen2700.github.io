@@ -106,9 +106,22 @@ function load(data) {
 function show(view) { for (const v of ['start', 'progress', 'app']) $('#' + v).hidden = v !== view; if (view !== 'app') hideTip(); }
 function showStartError(msg) { const e = $('#startError'); e.textContent = msg; e.hidden = !msg; if (msg) show(D ? 'app' : 'start'); }
 const REPORT = /\.(xls|xlsx|xlsm|csv)$/i;
-function readFiles(items) {
+// Everything picked so far, so folders and files can be added a few at a time; each addition re-reads
+// the whole set (in this page's memory only) and the same file picked twice counts once.
+let LOADED = new Map();
+const itemKey = (it) => `${it.file.name}|${it.file.size}|${it.file.lastModified}`;
+function addItems(items, merge) {
   items = items.filter((it) => REPORT.test(it.file.name) && !/^~\$/.test(it.file.name));
-  if (!items.length) { showStartError('No report files there. Choose the .xls exports from Salesforce, or the folder that holds them.'); return; }
+  if (!items.length) {
+    const msg = 'No report files there. Choose the .xls exports from Salesforce, or the folder that holds them.';
+    if (merge && D) { $('#notice').hidden = false; $('#notice').textContent = msg; } else showStartError(msg);
+    return;
+  }
+  if (!merge) LOADED = new Map();
+  for (const it of items) { const k = itemKey(it), old = LOADED.get(k); if (!old || (it.path.includes('/') && !old.path.includes('/'))) LOADED.set(k, it); }
+  readFiles([...LOADED.values()]);
+}
+function readFiles(items) {
   if (typeof Worker === 'undefined') { showStartError('This browser cannot read the files. Use a current version of Edge, Chrome, Firefox or Safari.'); return; }
   showStartError('');
   const list = $('#progressList'), rows = new Map(), done = new Set();
@@ -141,10 +154,12 @@ function readFiles(items) {
   worker.postMessage({ files: items });
 }
 const fromInputEl = (fl) => [...(fl || [])].map((f) => ({ file: f, path: f.webkitRelativePath || f.name }));
-$('#folderInput').addEventListener('change', (e) => { readFiles(fromInputEl(e.target.files)); e.target.value = ''; });
-$('#filesInput').addEventListener('change', (e) => { readFiles(fromInputEl(e.target.files)); e.target.value = ''; });
+$('#folderInput').addEventListener('change', (e) => { addItems(fromInputEl(e.target.files), !!D); e.target.value = ''; });
+$('#filesInput').addEventListener('change', (e) => { addItems(fromInputEl(e.target.files), !!D); e.target.value = ''; });
+$('#addFolderInput').addEventListener('change', (e) => { addItems(fromInputEl(e.target.files), true); e.target.value = ''; });
+$('#addFilesInput').addEventListener('change', (e) => { addItems(fromInputEl(e.target.files), true); e.target.value = ''; });
 $('#cancelBtn').addEventListener('click', () => { if (worker) { worker.terminate(); worker = null; } show(D ? 'app' : 'start'); });
-$('#closeBtn').addEventListener('click', () => { D = null; V = null; L = null; show('start'); });
+$('#closeBtn').addEventListener('click', () => { D = null; V = null; L = null; LOADED = new Map(); show('start'); });
 
 // Dropped folders are walked so each report keeps its team folder in its path.
 async function dropItems(dtf) {
@@ -166,7 +181,7 @@ document.addEventListener('dragover', (e) => e.preventDefault());
 document.addEventListener('drop', (e) => {
   e.preventDefault(); dragDepth = 0; document.body.classList.remove('dragging');
   if (worker || !e.dataTransfer) return;
-  dropItems(e.dataTransfer).then(readFiles, (err) => showStartError('Those files could not be opened: ' + err.message));
+  dropItems(e.dataTransfer).then((items) => addItems(items, !!D), (err) => showStartError('Those files could not be opened: ' + err.message));
 });
 
 // ---------- matching workbook names to Salesforce ----------

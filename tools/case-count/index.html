@@ -21,9 +21,9 @@
     <p>Your ACTIONED &amp; CLOSED CASE COUNT tabs, filled from the Salesforce exports. Choose the Cview Report folder (with the workbook in it, closed in Excel) to load everything at once.</p>
     <div class="actions">
       <label class="btn" for="folderInput">Choose folder</label>
-      <label class="link" for="filesInput">Choose files</label>
+      <label class="link" for="filesInput">Choose files (select several at once)</label>
     </div>
-    <div class="cc-drop" id="drop">or drop the folder or the .xls reports here. Each team folder (US East, US West, Legacy, …) becomes a team.</div>
+    <div class="cc-drop" id="drop">or drop folders and .xls reports here, as many as you like. You can keep adding more folders or files after the first ones load.</div>
     <p class="cc-privacy">Your files stay on this computer. The browser reads them directly and nothing is sent anywhere.</p>
     <p class="cc-error" id="startError" role="alert" hidden></p>
   </section>
@@ -36,7 +36,9 @@
     <button class="cc-linkbtn" id="cancelBtn" type="button">Cancel</button>
   </section>
   <input type="file" id="folderInput" webkitdirectory multiple hidden>
-  <input type="file" id="filesInput" accept=".xls,.xlsx,.csv" multiple hidden>
+  <input type="file" id="filesInput" accept=".xls,.xlsx,.xlsm,.csv" multiple hidden>
+  <input type="file" id="addFolderInput" webkitdirectory multiple hidden>
+  <input type="file" id="addFilesInput" accept=".xls,.xlsx,.xlsm,.csv" multiple hidden>
 
   <div class="cc" id="app" hidden>
     <header class="cc-head">
@@ -49,9 +51,9 @@
         <div id="meta"></div>
         <div class="cc-meta-actions">
           <button class="cc-btn cc-btn-primary" id="exportBtn" type="button" title="Download every table for the current filters as an Excel workbook">Export to Excel</button>
-          <label class="cc-btn" for="folderInput">Load new folder</label>
-          <label class="cc-linkbtn" for="filesInput">Load files</label>
-          <button class="cc-linkbtn" id="closeBtn" type="button">Close data</button>
+          <label class="cc-btn" for="addFolderInput" title="Add another folder of reports to what's loaded">Add folder</label>
+          <label class="cc-btn" for="addFilesInput" title="Add more report files to what's loaded">Add files</label>
+          <button class="cc-linkbtn" id="closeBtn" type="button" title="Clear everything and start again">Start over</button>
         </div>
       </div>
     </header>
