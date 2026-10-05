@@ -52,6 +52,7 @@
           <button class="otp-btn" id="exportBtn" type="button" title="Download the filtered data as an Excel workbook">Export to Excel</button>
           <label class="otp-btn" for="xlsxInput">Load new Excel files</label>
           <button class="otp-linkbtn" id="saveBtn" type="button">Save data file</button>
+          <button class="otp-linkbtn" id="revBtn" type="button" title="Show or hide revenue everywhere, including exports">Hide revenue</button>
           <button class="otp-linkbtn" id="forgetBtn" type="button">Close data</button>
         </div>
       </div>
@@ -187,7 +188,7 @@
           <div class="chart" id="fcOtp"></div>
         </div>
       </div>
-      <div class="card">
+      <div class="card" id="fcRevCard">
         <div class="card-h"><h2>Revenue per week</h2><span class="sub">delivered revenue, actual and projected</span></div>
         <div class="legend"><span><i style="background:var(--s1)"></i>Actual</span><span><i class="dash" style="--c:var(--s1)"></i>Projected</span><span><i class="sq band" style="--c:var(--s1)"></i>Likely range</span></div>
         <div class="chart" id="fcRev"></div>

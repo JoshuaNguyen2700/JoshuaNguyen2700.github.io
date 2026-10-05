@@ -58,7 +58,10 @@ const byName = (names) => (a, b) => {
 };
 
 const defaults = () => ({ regions: Array.from({ length: NR }, (_, i) => i), account: -1, csr: -1, cust: -1,
-  from: months[0], to: months[months.length - 1], tab: 'dash', otpMetric: 'gross', csrMetric: 'gross', csrVol: 'adj', csrPer: 'week', fcH: 8, fcBasis: 12 });
+  from: months[0], to: months[months.length - 1], tab: 'dash', otpMetric: 'gross', csrMetric: 'gross', csrVol: 'adj', csrPer: 'week', fcH: 8, fcBasis: 12, revOn: true });
+// Revenue can be hidden everywhere (screens and exports), e.g. when sharing the screen.
+const showRev = () => S.revOn !== false;
+function revUi() { $('#revBtn').textContent = showRev() ? 'Hide revenue' : 'Show revenue'; }
 const saveState = () => { try { localStorage.setItem(STATE_KEY, JSON.stringify(S)); } catch (e) {} };
 
 function validate(d) {
@@ -116,7 +119,7 @@ function load(d) {
   $('#notice').textContent = skipped.length ? 'Skipped: ' + skipped.map((s) => `${s.file} ${s.reason}`).join('; ') + '.' : '';
   const nFiles = (DATA.sources || []).length, nRows = Object.values(DATA.checks || {}).reduce((s, v) => s + (v.rows || 0), 0);
   $('#meta').innerHTML = `${plural(nRows, 'HAWB')} from ${plural(nFiles, 'file')} · built ${esc(fmtBuilt(DATA.generated))}`;
-  buildFilters(); aggregate(); renderMini(); setTab(S.tab);
+  revUi(); buildFilters(); aggregate(); renderMini(); setTab(S.tab);
 }
 
 // ---------- opening files ----------
@@ -199,6 +202,7 @@ $('#saveBtn').addEventListener('click', () => {
   document.body.append(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 4000);
 });
+$('#revBtn').addEventListener('click', () => { S.revOn = !showRev(); saveState(); revUi(); render(); });
 $('#forgetBtn').addEventListener('click', () => {
   DATA = null; A = null;
   show('start');
@@ -441,8 +445,8 @@ function pctCell(p, h, metric) {
 function weekTable() {
   const keys = sortedKeys(A.podW), multi = multiYear(keys), t = A.tot;
   if (!keys.length) { $('#tWeek').innerHTML = emptyMsg('No delivered shipments for these filters.'); return; }
-  const line = (label, w) => `<td>${label}</td><td>${fmtN(w.h)}</td><td>${fmt$(w.rev)}</td><td>${fmtN(w.gl)}</td><td>${fmtN(w.nl)}</td><td>${fmtP(1 - w.gl / w.h)}</td><td>${fmtP(1 - w.nl / w.h, 2)}</td>`;
-  $('#tWeek').innerHTML = `<table><thead><tr><th>POD week</th><th>HAWBs</th><th>Total revenue</th><th>Gross late</th><th>Net late</th><th>On-time gross %</th><th>On-time net %</th></tr></thead><tbody>` +
+  const line = (label, w) => `<td>${label}</td><td>${fmtN(w.h)}</td>${showRev() ? `<td>${fmt$(w.rev)}</td>` : ''}<td>${fmtN(w.gl)}</td><td>${fmtN(w.nl)}</td><td>${fmtP(1 - w.gl / w.h)}</td><td>${fmtP(1 - w.nl / w.h, 2)}</td>`;
+  $('#tWeek').innerHTML = `<table><thead><tr><th>POD week</th><th>HAWBs</th>${showRev() ? '<th>Total revenue</th>' : ''}<th>Gross late</th><th>Net late</th><th>On-time gross %</th><th>On-time net %</th></tr></thead><tbody>` +
     keys.slice().reverse().map((k) => k === thisWeek().key ? `<tr class="now">${line(wkLabel(k, multi) + nowTag, A.podW.get(k))}</tr>`
       : `<tr>${line(wkLabel(k, multi) + (isPartial(k) ? partTag : ''), A.podW.get(k))}</tr>`).join('') +
     `<tr class="total">${line('Grand total', t)}</tr></tbody></table>`;
@@ -453,9 +457,9 @@ function regionTable() {
   if (!ids.length) { $('#tRegion').innerHTML = emptyMsg('No data for these filters.'); return; }
   const line = (label, shipped, p) => {
     const g = p.h ? 1 - p.gl / p.h : null;
-    return `<td>${label}</td><td>${fmtN(shipped)}</td><td>${fmtN(p.h)}</td><td>${fmt$c(p.rev)}</td><td>${fmtP(g)}<span class="meter"><b style="width:${((g || 0) * 100).toFixed(1)}%"></b></span></td><td>${p.h ? fmtP(1 - p.nl / p.h, 2) : '–'}</td>`;
+    return `<td>${label}</td><td>${fmtN(shipped)}</td><td>${fmtN(p.h)}</td>${showRev() ? `<td>${fmt$c(p.rev)}</td>` : ''}<td>${fmtP(g)}<span class="meter"><b style="width:${((g || 0) * 100).toFixed(1)}%"></b></span></td><td>${p.h ? fmtP(1 - p.nl / p.h, 2) : '–'}</td>`;
   };
-  $('#tRegion').innerHTML = `<table><thead><tr><th>Region</th><th>Shipped</th><th>Delivered</th><th>Revenue</th><th>Gross OTP</th><th>Net OTP</th></tr></thead><tbody>` +
+  $('#tRegion').innerHTML = `<table><thead><tr><th>Region</th><th>Shipped</th><th>Delivered</th>${showRev() ? '<th>Revenue</th>' : ''}<th>Gross OTP</th><th>Net OTP</th></tr></thead><tbody>` +
     ids.map((i) => `<tr>${line(esc(dims.region[i]), A.regS.get(i) || 0, A.regP.get(i) || { h: 0, gl: 0, nl: 0, rev: 0 })}</tr>`).join('') +
     `<tr class="total">${line('Total', A.tot.shipped, A.tot)}</tr></tbody></table>`;
 }
@@ -565,7 +569,7 @@ function tiles() {
   $('#tiles').innerHTML =
     tile('HAWBs shipped', fmtN(t.shipped), 'by ship date in period') +
     tile('HAWBs delivered', fmtN(t.h), 'with a POD in period') +
-    tile('Total revenue', fmt$c(t.rev), 'on delivered HAWBs') +
+    (showRev() ? tile('Total revenue', fmt$c(t.rev), 'on delivered HAWBs') : '') +
     tile('On-time gross', fmtP(g), `${fmtN(t.gl)} gross late`) +
     tile('On-time net', fmtP(n, 2), `<span class="pill ${t.nl ? 'bad' : 'ok'}">${fmtN(t.nl)} controllable late</span>`) +
     tile('Late, uncontrollable', fmtN(t.gl - t.nl), t.gl ? fmtP((t.gl - t.nl) / t.gl) + ' of gross late' : '');
@@ -765,7 +769,7 @@ function projections() {
     tile('recent trend', (trendPct >= 0 ? '+' : '') + (trendPct * 100).toFixed(1) + '% a week', `${trendPct >= 0 ? 'more' : 'fewer'} HAWBs each week over the last ${sb.length} weeks`) +
     tile('gross OTP', fmtP(gross[0].mid), `likely ${fmtP(gross[0].lo)} – ${fmtP(gross[0].hi)} in a given week`) +
     tile('net OTP', fmtP(net[0].mid, 2), `likely ${fmtP(net[0].lo, 2)} – ${fmtP(net[0].hi, 2)} in a given week`) +
-    tile(`revenue, next ${H} weeks`, fmt$c(sum(rev.out, 'mid')), `likely ${fmt$c(sum(rev.out, 'lo'))} – ${fmt$c(sum(rev.out, 'hi'))}`);
+    (showRev() ? tile(`revenue, next ${H} weeks`, fmt$c(sum(rev.out, 'mid')), `likely ${fmt$c(sum(rev.out, 'lo'))} – ${fmt$c(sum(rev.out, 'hi'))}`) : '');
 
   // chart series: up to 26 actual weeks, then H projected weeks joined at the last actual week
   const build = (hist, val, proj) => {
@@ -789,8 +793,9 @@ function projections() {
       ? row('Gross on-time', `${fmtP(g.mid[i])} (${fmtP(g.lo[i])} – ${fmtP(g.hi[i])})`, c.s1) + row('Net on-time', `${fmtP(nn.mid[i], 2)} (${fmtP(nn.lo[i], 2)} – ${fmtP(nn.hi[i], 2)})`, c.s3)
       : row('Gross on-time', fmtP(g.actual[i]), c.s1) + row('Net on-time', fmtP(nn.actual[i], 2), c.s3));
   } });
+  $('#fcRevCard').hidden = !showRev();
   const r = build(pod, (p) => p.v[3], rev.out);
-  fcChart($('#fcRev'), r.keys, r.nActual, [{ color: 's1', ...r }], { money: true, tip: (i) => {
+  if (showRev()) fcChart($('#fcRev'), r.keys, r.nActual, [{ color: 's1', ...r }], { money: true, tip: (i) => {
     const isP = i >= r.nActual;
     return head(r.keys, i, isP) + (isP ? row('Projected revenue', fmt$(r.mid[i]), c.s1) + row('Likely range', `${fmt$(r.lo[i])} – ${fmt$(r.hi[i])}`) : row('Delivered revenue', fmt$(r.actual[i]), c.s1));
   } });
@@ -799,12 +804,12 @@ function projections() {
   const tw = thisWeek(), isNowIdx = (i) => i === mondayIdx(tw.year, tw.week);
   const wkName = (h) => `${idxLabel(lastShip + h + 1)}, ${idxDate(lastShip + h + 1).getUTCFullYear()}`;
   const fig = (v, lo, hi) => `<td>${v}<span class="rg">${lo} – ${hi}</span></td>`;
-  $('#fcTable').innerHTML = `<table><thead><tr><th>Week of</th><th>HAWBs shipped</th><th>Gross OTP</th><th>Net OTP</th><th>Revenue</th></tr></thead><tbody>` +
+  $('#fcTable').innerHTML = `<table><thead><tr><th>Week of</th><th>HAWBs shipped</th><th>Gross OTP</th><th>Net OTP</th>${showRev() ? '<th>Revenue</th>' : ''}</tr></thead><tbody>` +
     vol.out.map((p, h) => `<tr${isNowIdx(lastShip + h + 1) ? ' class="now"' : ''}><td>${wkName(h)}${isNowIdx(lastShip + h + 1) ? nowTag : ''}</td>` +
       fig(fmtN(p.mid), fmtN(p.lo), fmtN(p.hi)) + fig(fmtP(gross[h].mid), fmtP(gross[h].lo), fmtP(gross[h].hi)) +
-      fig(fmtP(net[h].mid, 2), fmtP(net[h].lo, 2), fmtP(net[h].hi, 2)) + fig(fmt$(rev.out[h].mid), fmt$(rev.out[h].lo), fmt$(rev.out[h].hi)) + '</tr>').join('') +
+      fig(fmtP(net[h].mid, 2), fmtP(net[h].lo, 2), fmtP(net[h].hi, 2)) + (showRev() ? fig(fmt$(rev.out[h].mid), fmt$(rev.out[h].lo), fmt$(rev.out[h].hi)) : '') + '</tr>').join('') +
     `<tr class="total"><td>Total</td>${fig(fmtN(sum(vol.out, 'mid')), fmtN(sum(vol.out, 'lo')), fmtN(sum(vol.out, 'hi')))}<td></td><td></td>` +
-    `${fig(fmt$(sum(rev.out, 'mid')), fmt$(sum(rev.out, 'lo')), fmt$(sum(rev.out, 'hi')))}</tr></tbody></table>`;
+    `${showRev() ? fig(fmt$(sum(rev.out, 'mid')), fmt$(sum(rev.out, 'lo')), fmt$(sum(rev.out, 'hi'))) : ''}</tr></tbody></table>`;
 }
 
 // ---------- export to Excel and copy tables ----------
@@ -933,12 +938,13 @@ async function exportExcel() {
     add('OTP by CSR', stackBlocks([['BY MONTH', otpBlock(A.podRows, 3, 'month', 'CSR')], ['BY WEEK', otpBlock(A.podRows, 3, 'week', 'CSR')]]), 26);
     // dashboard tables
     const wkKeys = sortedKeys(A.podW), multi = multiYear(wkKeys);
-    const line = (label, w) => [label, x0(w.h), x0(w.rev, '$#,##0'), x0(w.gl), x0(w.nl), xP(1 - w.gl / w.h), xP(1 - w.nl / w.h, '0.00%')];
-    add('Weekly Summary', { aoa: [['POD week', 'HAWBs', 'Total revenue', 'Gross late', 'Net late', 'On-time gross %', 'On-time net %'],
+    const R = showRev(), only = (x) => (R ? [x] : []);
+    const line = (label, w) => [label, x0(w.h), ...only(x0(w.rev, '$#,##0')), x0(w.gl), x0(w.nl), xP(1 - w.gl / w.h), xP(1 - w.nl / w.h, '0.00%')];
+    add('Weekly Summary', { aoa: [['POD week', 'HAWBs', ...only('Total revenue'), 'Gross late', 'Net late', 'On-time gross %', 'On-time net %'],
       ...wkKeys.map((k) => line(xWeek(k, multi), A.podW.get(k))), ...(A.tot.h ? [line('Grand total', A.tot)] : [])], merges: [] }, 14);
     const regIds = [...new Set([...A.regP.keys(), ...A.regS.keys()])].sort((a, b) => a - b), none = { h: 0, gl: 0, nl: 0, rev: 0 };
-    const rline = (label, s, p) => [label, x0(s), x0(p.h), x0(p.rev, '$#,##0'), p.h ? xP(1 - p.gl / p.h) : '', p.h ? xP(1 - p.nl / p.h, '0.00%') : ''];
-    add('By Region', { aoa: [['Region', 'Shipped', 'Delivered', 'Revenue', 'Gross OTP', 'Net OTP'],
+    const rline = (label, s, p) => [label, x0(s), x0(p.h), ...only(x0(p.rev, '$#,##0')), p.h ? xP(1 - p.gl / p.h) : '', p.h ? xP(1 - p.nl / p.h, '0.00%') : ''];
+    add('By Region', { aoa: [['Region', 'Shipped', 'Delivered', ...only('Revenue'), 'Gross OTP', 'Net OTP'],
       ...regIds.map((i) => rline(dims.region[i], A.regS.get(i) || 0, A.regP.get(i) || none)), rline('Total', A.tot.shipped, A.tot)], merges: [] }, 16);
     const late = [...A.delay.entries()].map(([k, v]) => [dims.delay[k], v[0], v[1]]).sort((a, b) => b[1] + b[2] - a[1] - a[2]);
     const lateTot = late.reduce((s, x) => s + x[1] + x[2], 0);
@@ -1269,7 +1275,7 @@ async function exportPpt() {
         ['Controllable late', fmtN(t.nl), `${pctTxt(t.h ? t.nl / t.h : null, 2)} of deliveries`, null],
         ['HAWBs shipped', fmtN(t.shipped), 'by ship date', null],
         ['HAWBs delivered', fmtN(t.h), 'with a POD', null],
-        ['Revenue', fmt$c(t.rev), 'on delivered HAWBs', null],
+        showRev() ? ['Revenue', fmt$c(t.rev), 'on delivered HAWBs', null] : ['Gross late', fmtN(t.gl), 'missed the adjusted due date', null],
       ];
       const tw3 = (CW - 2 * 0.45) / 3;
       tiles.forEach(([lab, val, note, d], i) => {
