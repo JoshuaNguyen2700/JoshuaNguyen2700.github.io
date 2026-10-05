@@ -24,11 +24,11 @@
       "standalone": true
     },
     {
-      "id": "case-count",
-      "name": "Case Count",
-      "blurb": "Actioned & closed",
-      "status": "live",
-      "icon": "chart"
+      "id": "tool-4",
+      "name": "Tool 4",
+      "blurb": "A new tool is on the way.",
+      "status": "soon",
+      "icon": "plus"
     },
     {
       "id": "tool-5",

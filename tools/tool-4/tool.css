@@ -1,0 +1,2 @@
+/* Styles for the tool-4 tool only. This file loads on this tool's pages alone, and its rules
+   always take priority over the shared bus styles, so nothing here can affect another page. */
