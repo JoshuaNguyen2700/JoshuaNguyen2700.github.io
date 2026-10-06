@@ -107,7 +107,8 @@ async function scan(reader, sep, fn) {
 // ---------- sheet XML ----------
 const ROW_RE = /<row\b([^>]*?)(?:\/>|>([\s\S]*?)<\/row>)/g;
 const CELL_RE = /<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g;
-const V_RE = /<v>([\s\S]*?)<\/v>/, F_RE = /<f\b[^>]*>([\s\S]*?)<\/f>/, T_RE = /<t\b[^>]*>([\s\S]*?)<\/t>/g;
+// <v> can carry attributes: Excel writes text with leading/trailing spaces as <v xml:space="preserve">
+const V_RE = /<v\b[^>]*>([\s\S]*?)<\/v>/, F_RE = /<f\b[^>]*>([\s\S]*?)<\/f>/, T_RE = /<t\b[^>]*>([\s\S]*?)<\/t>/g;
 // A cell value: number, string, or {s: index} for a shared string (resolved after the shared-string pass)
 function cellValue(attrs, inner) {
   const t = /\st="(\w+)"/.exec(attrs)?.[1];
@@ -355,6 +356,16 @@ async function processWorkbook(file, agg, progress) {
   }
   const hol = new Set();
   if (hm) { const c = colIndex(hm[1]); for (let r = +hm[2] - 1; r <= +hm[4] - 1; r++) { const s = toSerial(val(csrGrid[r]?.[c])); if (s) hol.add(s); } }
+  // When the formulas were replaced by values (pasted as values) there is no range to follow, so use the
+  // dates listed under the HOLIDAYS heading on the CSR tab (the same list the formula points at).
+  if (!hm) {
+    let hr = -1, hc = -1;
+    csrGrid.forEach((r, ri) => r && r.forEach((v, ci) => { if (hr < 0 && /^\s*holidays?\s*$/i.test(str(val(v)))) { hr = ri; hc = ci; } }));
+    for (let r = hr + 1; hr >= 0 && r < csrGrid.length; r++) for (const c of [hc, hc + 1]) {
+      const v = val(csrGrid[r]?.[c]), s = typeof v === 'number' ? (v > 30000 && v < 80000 ? Math.floor(v) : null) : toSerial(str(v).trim());
+      if (s) hol.add(s);
+    }
+  }
   const ctrl = new Map();
   for (const r of delayGrid.slice(1)) { if (!r) continue; const k = str(val(r[0])).toUpperCase(); if (k && !ctrl.has(k)) ctrl.set(k, str(val(r[2])).trim()); }
 
