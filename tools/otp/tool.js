@@ -1,5 +1,5 @@
 // Logic for the otp tool only. It is an ES module, so nothing here leaks into other pages.
-// The page ships with no shipment data. The visitor picks the regional Excel exports (.xlsx); worker.js
+// The page ships with no shipment data. The visitor picks the regional Excel exports (.xlsx or .xlsb); worker.js
 // reads them in the browser with parse.js (nothing is uploaded). A saved data file (.json, from
 // "Save data file" or build_otp_dashboard.py) opens instantly instead.
 import { esc } from '/assets/core/util.js';

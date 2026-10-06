@@ -18,12 +18,12 @@
   <section class="hero otp-start" id="start">
     <div class="eyebrow">Upload this week's regional exports</div>
     <h1>OTP Dashboard</h1>
-    <p>Weekly on-time delivery by region, customer and CSR. Choose your regional Excel exports (.xlsx) to begin.</p>
+    <p>Weekly on-time delivery by region, customer and CSR. Choose your regional Excel exports (.xlsx or .xlsb) to begin.</p>
     <div class="actions">
       <label class="btn" for="xlsxInput">Choose Excel files</label>
       <label class="link" for="fileInput">Open a saved data file</label>
     </div>
-    <div class="otp-drop" id="drop">or drop the .xlsx files here. Pick several at once to see every region together.</div>
+    <div class="otp-drop" id="drop">or drop the .xlsx / .xlsb files here. Pick several at once to see every region together.</div>
     <p class="otp-privacy">Your files stay on this computer. The browser reads them directly and nothing is sent anywhere.</p>
     <p class="otp-error" id="startError" role="alert" hidden></p>
   </section>
@@ -35,7 +35,7 @@
     <ul id="progressList"></ul>
     <button class="otp-linkbtn" id="cancelBtn" type="button">Cancel</button>
   </section>
-  <input type="file" id="xlsxInput" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple hidden>
+  <input type="file" id="xlsxInput" accept=".xlsx,.xlsb,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.binary.macroEnabled.12" multiple hidden>
   <input type="file" id="fileInput" accept=".json,application/json" hidden>
 
   <div class="otp" id="app" hidden>
