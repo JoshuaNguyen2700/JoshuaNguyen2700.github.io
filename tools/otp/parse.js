@@ -488,7 +488,8 @@ export async function buildFromFiles(files, progress = () => {}) {
       const wins = !prev || r.maxShip > prev.r.maxShip || (r.maxShip === prev.r.maxShip && (f.lastModified || 0) > (prev.f.lastModified || 0));
       if (prev) {
         const [keep, drop] = wins ? [f, prev.f] : [prev.f, f];
-        skipped.push({ file: drop.name, reason: `is another ${r.region} file; ${keep.name} has newer shipments and is used instead` });
+        const why = r.maxShip === prev.r.maxShip ? 'has the same shipments and was saved later' : 'has newer shipments';
+        skipped.push({ file: drop.name, reason: `is another ${r.region} file; ${keep.name} ${why} and is used instead` });
       }
       if (wins) best.set(r.region, { f, a, r });
     } catch (e) {
