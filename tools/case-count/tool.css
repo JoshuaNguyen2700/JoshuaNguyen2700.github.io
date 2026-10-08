@@ -248,3 +248,9 @@
 .cc #tFiles td:last-child{text-align:right}
 .cc-x{font:inherit;font-size:13px;color:var(--crit);background:none;border:0;padding:0 2px;cursor:pointer}
 .cc-x:hover{text-decoration:underline}
+/* the checklist sits inside a filter .field, whose small-caps label style must not reach it */
+.field .ms-list label{display:flex;font-size:13px;font-weight:400;text-transform:none;letter-spacing:normal;color:var(--text)}
+.field .ms-list label.g{font-weight:700;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--o-ink2)}
+.field .ms-list label small{font-size:12px;color:var(--muted);text-transform:none;letter-spacing:normal}
+.cc #tFiles th,.cc #tFiles td{text-align:left}
+.cc #tFiles th:nth-child(4),.cc #tFiles td:nth-child(4),.cc #tFiles td:last-child{text-align:right}

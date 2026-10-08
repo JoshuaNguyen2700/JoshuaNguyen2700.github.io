@@ -65,7 +65,10 @@ function addItems(items, merge) {
   for (const it of items) { const k = itemKey(it), old = LOADED.get(k); if (!old || (it.path.includes('/') && !old.path.includes('/'))) LOADED.set(k, it); }
   readFiles([...LOADED.values()]);
 }
+// The files in the last read, in the order the worker lists them (two files can share a name).
+let READ = [];
 function readFiles(items) {
+  READ = items;
   if (typeof Worker === 'undefined') { showStartError('This browser cannot read the files. Use a current version of Edge, Chrome, Firefox or Safari.'); return; }
   showStartError('');
   const list = $('#progressList'), rows = new Map(), done = new Set();
@@ -154,7 +157,16 @@ function multiSelect(root, opts) {
       return (g.label ? `<label class="g"><input type="checkbox" data-g="${gi}"${n && n === g.items.length ? ' checked' : ''}><span>${esc(g.label)}</span></label>` : '') +
         g.items.map((it) => `<label class="${g.label ? 'it' : ''}" title="${esc(it.title || it.label)}"><input type="checkbox" data-id="${esc(it.id)}"${s.has(it.id) ? ' checked' : ''}><span>${esc(it.label)}</span>${it.sub ? `<small>${esc(it.sub)}</small>` : ''}</label>`).join('');
     }).join('') : `<div class="ms-empty">Nothing matches.</div>`;
-    gs.forEach((g, gi) => { const b = list.querySelector(`[data-g="${gi}"]`), n = g.items.filter((it) => s.has(it.id)).length; if (b) b.indeterminate = n > 0 && n < g.items.length; });
+    sync();
+  };
+  // Tick marks and group states updated in place, so focus and scroll stay put while ticking.
+  const sync = () => {
+    const s = sel(), gs = shown();
+    list.querySelectorAll('input[data-id]').forEach((x) => { x.checked = s.has(x.dataset.id); });
+    gs.forEach((g, gi) => {
+      const b = list.querySelector(`[data-g="${gi}"]`), n = g.items.filter((it) => s.has(it.id)).length;
+      if (b) { b.checked = n > 0 && n === g.items.length; b.indeterminate = n > 0 && n < g.items.length; }
+    });
     label();
   };
   const open = (on) => { pop.hidden = !on; btn.setAttribute('aria-expanded', String(on)); if (on) { q.value = ''; draw(); q.focus(); } };
@@ -164,17 +176,17 @@ function multiSelect(root, opts) {
     const s = sel(), x = e.target;
     if (x.dataset.g != null) { const g = shown()[+x.dataset.g]; for (const it of g.items) { if (x.checked) s.add(it.id); else s.delete(it.id); } }
     else if (x.dataset.id != null) { if (x.checked) s.add(x.dataset.id); else s.delete(x.dataset.id); }
-    draw(); opts.onChange();
+    sync(); opts.onChange();
   });
   root.querySelector('.ms-acts').addEventListener('click', (e) => {
     const b = e.target.closest('button'); if (!b) return;
     const s = sel();
     if (b.dataset.act === 'all') for (const g of shown()) for (const it of g.items) s.add(it.id);
     else s.clear();
-    draw(); opts.onChange();
+    sync(); opts.onChange();
   });
   document.addEventListener('click', (e) => { if (!pop.hidden && !root.contains(e.target)) open(false); });
-  root.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !pop.hidden) { open(false); btn.focus(); } });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !pop.hidden) { open(false); btn.focus(); } });
   return { setGroups(g) { groups = g; const ids = new Set(g.flatMap((x) => x.items.map((it) => it.id))); for (const id of [...sel()]) if (!ids.has(id)) sel().delete(id); if (!pop.hidden) draw(); else label(); } };
 }
 const msPeople = multiSelect($('#msPeople'), { noun: 'person', plural: 'people', labelId: 'lPeople', selected: () => S.people, onChange: () => { fillCustomers(); render(); } });
@@ -393,14 +405,15 @@ function about() {
       <li>Weekends are left out unless "Include weekends" is ticked. Ship counts (the WK SHIP CT columns) aren't in these exports and aren't shown.</li>
     </ul>`;
   $('#tFiles').innerHTML = `<table><thead><tr><th>File</th><th>Team</th><th>Report</th><th style="text-align:right">Rows</th><th>Dates</th><th></th></tr></thead><tbody>` +
-    M.D.files.map((f) => `<tr class="${f.kind ? '' : 'muted'}"><td>${esc(f.name)}</td><td>${esc(f.team || '–')}</td><td style="text-align:left">${esc(f.kind ? (f.kind === 'workbook' ? `${KIND.workbook}: ${f.note}` : KIND[f.kind]) : f.note || 'Skipped')}</td>` +
+    M.D.files.map((f, i) => `<tr class="${f.kind ? '' : 'muted'}"><td>${esc(f.name)}</td><td>${esc(f.team || '–')}</td><td style="text-align:left">${esc(f.kind ? (f.kind === 'workbook' ? `${KIND.workbook}: ${f.note}` : KIND[f.kind]) : f.note || 'Skipped')}</td>` +
       `<td style="text-align:right">${f.rows ? fmtN(f.rows) : ''}</td><td style="text-align:left">${f.from != null ? esc(span(f.from, f.to)) : ''}</td>` +
-      `<td><button class="cc-x" type="button" data-rm="${esc(f.name)}" title="Take this file out and recalculate">Remove</button></td></tr>`).join('') + '</tbody></table>';
+      `<td><button class="cc-x" type="button" data-rm="${i}" title="Take this file out and recalculate">Remove</button></td></tr>`).join('') + '</tbody></table>';
 }
 // Remove one loaded file and re-read the rest (the last one removed goes back to the start screen).
 $('#tFiles').addEventListener('click', (e) => {
   const b = e.target.closest('[data-rm]'); if (!b) return;
-  for (const [k, it] of LOADED) if (it.path === b.dataset.rm) LOADED.delete(k);
+  const gone = READ[+b.dataset.rm];
+  for (const [k, it] of LOADED) if (it === gone) LOADED.delete(k);
   if (LOADED.size) readFiles([...LOADED.values()]); else { M = null; L = null; show('start'); }
 });
 $('#filesBtn').addEventListener('click', () => { setTab('names'); requestAnimationFrame(() => $('#tFiles').scrollIntoView({ behavior: 'smooth', block: 'center' })); });
