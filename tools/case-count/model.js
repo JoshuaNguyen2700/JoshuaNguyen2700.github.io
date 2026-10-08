@@ -209,7 +209,14 @@ function matchCompanies(M, label, allowed) {
     if (lm / lt >= 0.5 && (cf > 0.5 || (cf >= 0.5 && all)) && seen.some(([w]) => w === words[0])) strong.push(c);
     else if (all && words.length && seen[0][0] === words[0]) loose.push(c);
   });
-  return strong.length ? strong : loose;
+  const out = strong.length ? strong : loose;
+  // Also count companies that start with the row's own first word when few companies share it: the
+  // same customer under a second Salesforce name ("ACME FREIGHT" also counts "Acme.com (Americas)").
+  const first = words[0], shared = first ? ct.t.filter((ts) => ts.some((x) => tokEq(first, x))).length : 0;
+  if (out.length && shared > 0 && shared <= 3) {
+    ct.t.forEach((ts, c) => { if ((!allowed || allowed.has(c)) && ts.length && tokEq(first, ts[0]) && !out.includes(c)) out.push(c); });
+  }
+  return out;
 }
 
 // ---------- filters ----------
