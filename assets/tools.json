@@ -24,18 +24,18 @@
       "standalone": true
     },
     {
-      "id": "emails-received",
-      "name": "Emails Received",
-      "blurb": "Customer emails by day",
-      "status": "live",
-      "icon": "chart"
-    },
-    {
       "id": "case-count",
       "name": "Case Count",
       "blurb": "Actioned & closed",
       "status": "live",
       "icon": "chart"
+    },
+    {
+      "id": "tool-5",
+      "name": "Tool 5",
+      "blurb": "A new tool is on the way.",
+      "status": "soon",
+      "icon": "plus"
     },
     {
       "id": "tool-6",
