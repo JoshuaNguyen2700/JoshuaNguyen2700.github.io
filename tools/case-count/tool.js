@@ -487,12 +487,13 @@ document.addEventListener('click', async (e) => {
   setTimeout(() => { b.textContent = label; }, 1500);
 });
 let xlsxLoading = null;
+// xlsx-js-style: SheetJS with cell styles, so the export carries the page's colors.
 function loadXlsx() {
   if (window.XLSX) return Promise.resolve(window.XLSX);
   if (!xlsxLoading) {
     xlsxLoading = new Promise((ok, fail) => {
       const s = document.createElement('script');
-      s.src = '/assets/vendor/xlsx.full.min.js';
+      s.src = '/assets/vendor/xlsx-js-style.min.js';
       s.onload = () => ok(window.XLSX);
       s.onerror = () => { xlsxLoading = null; fail(new Error('The Excel library could not be loaded. Check your connection and try again.')); };
       document.head.append(s);
@@ -508,26 +509,71 @@ function xCell(c) {
 const xDate = (d) => ({ t: 'n', v: d + 25569, z: 'm/d' });
 const dowRow = (m) => ['', ...m.cols.slice(1).map((c) => (c.d != null ? DOW[dowOf(c.d)].toUpperCase() : ''))];
 const headRow = (m, first) => [first, ...m.cols.slice(1).map((c) => (c.d != null ? xDate(c.d) : c.x))];
+// Export colors, like the page: blue headers, grey weekly TOTAL columns and TOTALS rows, rep and
+// supervisor rows in light blue, % ACTIONED green at or above the 85% goal and red below it.
+const XC = { head: 'D9E1F2', headWk: 'B4C6E7', wk: 'F2F2F2', total: 'D9D9D9', sub: 'EDEDED', grp: 'DDEBF7', okBg: 'E2EFDA', ok: '1E7B34', lowBg: 'FCE4D6', low: 'C00000', muted: '808080', line: 'A6A6A6' };
+function xs({ fill, bold, color, size, top, left } = {}) {
+  const s = { font: { name: 'Calibri', sz: size || 11, bold: !!bold, ...(color ? { color: { rgb: color } } : {}) } };
+  if (fill) s.fill = { patternType: 'solid', fgColor: { rgb: fill } };
+  if (top) s.border = { top: { style: 'thin', color: { rgb: XC.line } } };
+  s.alignment = { horizontal: left ? 'left' : 'right', vertical: 'center' };
+  return s;
+}
+// A sheet built row by row, each cell with its style; blank cells in a colored row get colored too.
+function xSheet() {
+  const rows = [], st = [];
+  const push = (vals, styles) => { rows.push(vals); st.push(styles || []); };
+  const title = (text) => push([text], [xs({ bold: true, size: 14, left: true })]);
+  const model = (m, first, dow) => {
+    const isWk = (c) => /\bwk\b/.test(c.cls || ''), head = (c, i) => xs({ fill: isWk(c) && i ? XC.headWk : XC.head, bold: true, left: !i });
+    if (dow) push(dowRow(m), m.cols.map(head));
+    push(first == null ? m.cols.map((c) => c.x) : headRow(m, first), m.cols.map(head));
+    for (const r of m.rows) {
+      const k = r.cls || '', total = /\btotal\b/.test(k), sub = /\bsub\b/.test(k), grp = /\bgrp\b/.test(k), key = /\bkey\b/.test(k);
+      push(r.c.map(xCell), r.c.map((c, i) => {
+        const col = m.cols[i] || {}, cls = `${col.cls || ''} ${c.cls || ''}`;
+        const o = { left: !i, bold: total || sub || grp || key, top: total };
+        if (total) o.fill = XC.total; else if (sub) o.fill = XC.sub; else if (grp) o.fill = XC.grp; else if (i && isWk(col)) { o.fill = XC.wk; o.bold = true; }
+        if (c.f === 'p' && c.v != null) { const good = c.v >= GOAL; o.color = good ? XC.ok : XC.low; o.fill = good ? XC.okBg : XC.lowBg; o.bold = true; }
+        else if (/\bmuted\b/.test(cls)) o.color = XC.muted;
+        return xs(o);
+      }));
+    }
+  };
+  const build = (XLSX, widths) => {
+    const ws = XLSX.utils.aoa_to_sheet(rows), w = Math.max(...rows.map((r) => r.length));
+    st.forEach((ss, r) => ss.forEach((s, c) => {
+      if (!s) return;
+      const a = XLSX.utils.encode_cell({ r, c });
+      if (!ws[a]) ws[a] = { t: 's', v: '' };
+      ws[a].s = s;
+    }));
+    ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: Math.max(0, rows.length - 1), c: Math.max(0, w - 1) } });
+    ws['!cols'] = Array.from({ length: w }, (_, i) => widths[i] || widths[widths.length - 1]);
+    return ws;
+  };
+  return { push, title, model, build };
+}
 // The export keeps the workbook's layout, so blocks can be pasted straight into it.
 async function exportExcel() {
   const btn = $('#exportBtn'), label = btn.textContent;
   btn.disabled = true; btn.textContent = 'Preparing…';
   try {
     const XLSX = await loadXlsx(), wb = XLSX.utils.book_new(), F = filters();
-    const add = (name, aoa, widths) => { const ws = XLSX.utils.aoa_to_sheet(aoa); ws['!cols'] = widths; XLSX.utils.book_append_sheet(wb, ws, name.slice(0, 31)); };
-    const aoa = [];
+    const add = (name, sh, widths) => XLSX.utils.book_append_sheet(wb, sh.build(XLSX, widths), name.slice(0, 31));
+    const cases = xSheet();
     for (const s of L.sections) {
       if (!s.rows.some((r) => F.rows.has(r.key))) continue;
-      aoa.push([s.name]);
-      for (const i of [0, 1]) { const m = casesModel(M, s, i, F); aoa.push(dowRow(m), headRow(m, i ? 'CASES CLOSED' : 'CASES ACTIONED'), ...m.rows.map((r) => r.c.map(xCell)), []); }
-      aoa.push([]);
+      cases.title(s.name);
+      for (const i of [0, 1]) { cases.model(casesModel(M, s, i, F), i ? 'CASES CLOSED' : 'CASES ACTIONED', true); cases.push([]); }
+      cases.push([]);
     }
-    const k = monthKey(S.to);
-    add(monthKey(S.from) === k ? `${SHEET_MON[k % 12]} ${Math.floor(k / 12)}` : 'CASES', aoa, [{ wch: 18 }]);
-    const cm = custModel(M, L, F);
-    add(`CUST E-MAILS${monthKey(S.from) === k ? ' ' + SHEET_MON[k % 12] : ''}`, [headRow(cm, 'CUSTOMER / REP'), ...cm.rows.map((r) => r.c.map(xCell))], [{ wch: 30 }]);
-    const sm = summaryModel(M, L, F);
-    add('BY PERSON', [sm.cols.map((c) => c.x), ...sm.rows.map((r) => r.c.map(xCell))], [{ wch: 24 }, { wch: 15 }, { wch: 13 }, { wch: 17 }, { wch: 16 }, { wch: 12 }]);
+    const k = monthKey(S.to), one = monthKey(S.from) === k;
+    add(one ? `${SHEET_MON[k % 12]} ${Math.floor(k / 12)}` : 'CASES', cases, [{ wch: 18 }, { wch: 8 }]);
+    const cust = xSheet(); cust.model(custModel(M, L, F), 'CUSTOMER / REP', false);
+    add(`CUST E-MAILS${one ? ' ' + SHEET_MON[k % 12] : ''}`, cust, [{ wch: 30 }, { wch: 8 }]);
+    const per = xSheet(); per.model(summaryModel(M, L, F), null, false);
+    add('BY PERSON', per, [{ wch: 24 }, { wch: 15 }, { wch: 13 }, { wch: 17 }, { wch: 16 }, { wch: 12 }]);
     const pad = (n) => String(n).padStart(2, '0'), d = new Date();
     XLSX.writeFile(wb, `ACTIONED & CLOSED CASE COUNT ${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}.xlsx`);
   } catch (err) {
