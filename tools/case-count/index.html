@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Case Count · Joshua Nguyen</title>
+<meta name="description" content="Cases actioned and closed and customer emails by person, filled from your Salesforce report exports like the ACTIONED &amp; CLOSED CASE COUNT workbook. Files stay on your computer.">
+<!-- Shared bus: absolute paths. This tool's own files: relative paths. -->
+<link rel="stylesheet" href="/assets/bus.css">
+<script src="/assets/core/theme.js"></script>
+<link rel="stylesheet" href="tool.css">
+</head>
+<body>
+<header data-shell="nav"></header>
+
+<main>
+  <!-- Shown until files are opened. No case data is ever stored in this website. -->
+  <section class="hero cc-start" id="start">
+    <div class="eyebrow">Upload the Cview Report folder</div>
+    <h1>Case Count</h1>
+    <p>Your ACTIONED &amp; CLOSED CASE COUNT numbers, filled from the Salesforce exports. Choose the Cview Report folder (the team folders plus the workbook, closed in Excel) to load everything at once.</p>
+    <div class="actions">
+      <label class="btn" for="folderInput">Choose folder</label>
+      <label class="link" for="filesInput">Choose files (select several at once)</label>
+    </div>
+    <div class="cc-drop" id="drop">or drop the folder, or the .xls reports, here. You can keep adding more folders or files after the first ones load.</div>
+    <p class="cc-privacy">Your files stay on this computer. The browser reads them directly and nothing is sent anywhere.</p>
+    <p class="cc-error" id="startError" role="alert" hidden></p>
+  </section>
+
+  <!-- Progress while the reports are read -->
+  <section class="cc-progress" id="progress" hidden aria-live="polite">
+    <h2>Reading your files</h2>
+    <p class="sub" id="progressCount"></p>
+    <ul id="progressList"></ul>
+    <button class="cc-linkbtn" id="cancelBtn" type="button">Cancel</button>
+  </section>
+  <input type="file" id="folderInput" webkitdirectory multiple hidden>
+  <input type="file" id="filesInput" accept=".xls,.xlsx,.xlsm,.csv" multiple hidden>
+  <input type="file" id="addFolderInput" webkitdirectory multiple hidden>
+  <input type="file" id="addFilesInput" accept=".xls,.xlsx,.xlsm,.csv" multiple hidden>
+
+  <div class="cc" id="app" hidden>
+    <header class="cc-head">
+      <div>
+        <div class="eyebrow" id="eyebrow">Actioned &amp; closed case count</div>
+        <h1>Case Count</h1>
+        <div class="cc-range" id="range"></div>
+      </div>
+      <div class="cc-meta">
+        <div id="meta"></div>
+        <div class="cc-meta-actions">
+          <button class="cc-btn cc-btn-primary" id="exportBtn" type="button" title="Download the tables for the current filters as an Excel workbook">Export to Excel</button>
+          <label class="cc-btn" for="addFolderInput" title="Add another folder of reports to what's loaded">Add folder</label>
+          <label class="cc-btn" for="addFilesInput" title="Add more report files to what's loaded">Add files</label>
+          <button class="cc-linkbtn" id="closeBtn" type="button" title="Clear everything and start again">Start over</button>
+        </div>
+      </div>
+    </header>
+    <p class="cc-banner" role="note"><span><b>Data is not saved.</b> Refreshing or closing this page clears it; load the folder again to bring it back.</span></p>
+    <p class="cc-notice" id="notice" hidden></p>
+
+    <!-- Filters apply to every tab. Leaving a list unticked means everyone / every customer. -->
+    <section class="cc-filters" aria-label="Filters">
+      <div class="frow">
+        <span class="eyebrow">Supervisor</span>
+        <div class="chips" id="secChips"></div>
+        <span class="eyebrow" id="teamLabel">Team folder</span>
+        <div class="chips" id="teamChips"></div>
+        <button class="cc-linkbtn" id="resetBtn" type="button">Reset filters</button>
+      </div>
+      <div class="frow">
+        <div class="field"><label id="lPeople">People</label><div class="ms" id="msPeople"></div></div>
+        <div class="field"><label id="lCust">Customers</label><div class="ms" id="msCust"></div></div>
+        <div class="field"><label for="fFrom">From</label><input type="date" id="fFrom"></div>
+        <div class="field"><label for="fTo">To</label><input type="date" id="fTo"></div>
+        <div class="field"><label>Dates</label><div class="seg" id="quick"></div></div>
+        <label class="cc-check"><input type="checkbox" id="fWeekends">Include weekends</label>
+      </div>
+    </section>
+
+    <nav class="cc-tabs" role="tablist" aria-label="Views">
+      <button class="tab" role="tab" type="button" data-tab="over">Overview</button>
+      <button class="tab" role="tab" type="button" data-tab="cases">Cases actioned &amp; closed</button>
+      <button class="tab" role="tab" type="button" data-tab="cust">Customer emails</button>
+      <button class="tab" role="tab" type="button" data-tab="names">Names &amp; sources</button>
+    </nav>
+
+    <section class="panel" id="p-over" role="tabpanel" hidden>
+      <div class="tiles-k" id="tiles"></div>
+      <div class="card">
+        <div class="card-h"><h2>Cases worked per day</h2><span class="sub">actioned + closed, with the customer emails received for the reps on CUST E-MAILS</span></div>
+        <div class="legend"><span><i class="sq" style="background:var(--s1)"></i>Cases actioned</span><span><i class="sq" style="background:var(--s3)"></i>Cases closed</span><span><i style="background:var(--s2)"></i>Customer emails</span></div>
+        <div class="chart" id="cDaily"></div>
+      </div>
+      <div class="grid2">
+        <div class="card">
+          <div class="card-h"><h2>By person</h2><span class="sub">grouped by supervisor; red = below the 85% goal</span><button class="cc-linkbtn copybtn" type="button" data-copy="#tPerson" title="Copy this table, then paste into Excel">Copy</button></div>
+          <div class="tscroll tall" id="tPerson"></div>
+        </div>
+        <div class="card">
+          <div class="card-h"><h2>Top customers</h2><span class="sub">emails received in the dates shown</span></div>
+          <div class="bars" id="topCust"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" id="p-cases" role="tabpanel" hidden></section>
+
+    <section class="panel" id="p-cust" role="tabpanel" hidden>
+      <div class="card">
+        <div class="card-h"><h2>CUST E-MAILS</h2><span class="sub" id="custSub"></span><button class="cc-linkbtn copybtn" type="button" data-copy="#mCust" title="Copy this table, then paste into Excel">Copy</button></div>
+        <div class="tscroll tall" id="mCust"></div>
+      </div>
+    </section>
+
+    <section class="panel" id="p-names" role="tabpanel" hidden>
+      <div class="card">
+        <div class="card-h"><h2>Names</h2><span class="sub">workbook name → Salesforce case owner</span></div>
+        <p class="note" id="namesNote"></p>
+        <div class="tscroll" id="tNames"></div>
+      </div>
+      <div class="card">
+        <div class="card-h"><h2>Customer rows</h2><span class="sub">CUST E-MAILS row → Salesforce companies counted</span></div>
+        <div class="tscroll" id="tCustMap"></div>
+      </div>
+      <div class="card">
+        <div class="card-h"><h2>Not on the workbook</h2><span class="sub">case owners in the exports with no row (queues, supervisors, other teams); their numbers aren't counted</span></div>
+        <div class="tscroll" id="tUnlisted"></div>
+      </div>
+      <div class="card about" id="about"></div>
+      <div class="card">
+        <div class="card-h"><h2>Files loaded</h2><span class="sub">the report type is recognised from each file's columns</span></div>
+        <div class="tscroll" id="tFiles"></div>
+      </div>
+    </section>
+  </div>
+</main>
+<div id="tip" hidden></div>
+
+<footer data-shell="footer"></footer>
+<script type="module" src="/assets/core/shell.js"></script>
+<script type="module" src="tool.js"></script>
+</body>
+</html>
