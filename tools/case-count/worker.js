@@ -222,6 +222,31 @@ function kindOf(h, rows) {
   return null;
 }
 
+// Files picked on their own (no team folder in the path) take their team from their contents: first from
+// cases they share with files whose team is known, then from the sender on a sent-emails report
+// ("CEVA Ground USEAST" -> East, "CEVA Ground USCORPORATE-LEGACY" -> Legacy), then shared cases again.
+function teamsFromContents(files) {
+  const loose = () => files.filter((f) => !f.team && f.kind && f.kind !== 'workbook');
+  const byCases = () => {
+    const caseTeam = new Map();
+    for (const f of files) if (f.team && f.cases) for (const cn of f.cases) if (!caseTeam.has(cn)) caseTeam.set(cn, f.team);
+    for (const f of loose()) {
+      const votes = new Map();
+      for (const cn of f.cases) { const t = caseTeam.get(cn); if (t) votes.set(t, (votes.get(t) || 0) + 1); }
+      const best = [...votes].sort((a, b) => b[1] - a[1])[0];
+      if (best && best[1] >= Math.max(3, f.cases.size * 0.05)) f.team = best[0];
+    }
+  };
+  byCases();
+  for (const f of loose()) {
+    const top = [...f.senders].sort((a, b) => b[1] - a[1])[0];
+    if (!top) continue;
+    const s = top[0].replace(/^CEVA\s+Ground\s*/i, '').split(/[-_]/).pop().replace(/^US(?=[A-Z]{3,})/i, '');
+    if (s) f.team = teamLabel(s);
+  }
+  byCases();
+}
+
 // ---------- build ----------
 async function build(items) {
   const files = [];
@@ -267,8 +292,11 @@ async function build(items) {
     const col = (r, c) => (H.has(c) ? r[H.get(c)] : '');
     const local = new Map(), add = (key, rec) => { const o = local.get(key); if (o) o.n++; else local.set(key, { ...rec, n: 1 }); };
     const span = (d) => { if (d == null) return; if (info.from == null || d < info.from) info.from = d; if (info.to == null || d > info.to) info.to = d; };
+    info.cases = new Set(); info.senders = new Map();   // for finding the team of a file picked on its own
     for (const r of body) {
       const cn = norm(col(r, 'case number')), owner = norm(col(r, 'case owner'));
+      info.cases.add(cn);
+      if (kind === 'sent') { const s = norm(col(r, 'from name')); if (s) info.senders.set(s, (info.senders.get(s) || 0) + 1); }
       if (kind === 'sent' || kind === 'received') {
         const day = dayOf(col(r, 'email message date')); if (day == null) continue;
         span(day);
@@ -287,6 +315,8 @@ async function build(items) {
     progress({ file: path || name, pct: 100, rows: info.rows, kind });
   }
   if (!files.some((f) => f.kind && f.kind !== 'workbook')) throw new Error('None of these files look like Salesforce case or email reports. Choose the Cview Report folder, or the .xls exports in its team folders.');
+  teamsFromContents(files);
+  for (const kind of ['sent', 'closed', 'received']) for (const v of K[kind].values()) if (!v.folder && v.fi != null) v.folder = files[v.fi].team;
 
   // Phase 2: who owns each case, and which team folder each person belongs to.
   const caseOwner = new Map();

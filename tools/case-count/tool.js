@@ -392,9 +392,18 @@ function about() {
       <li>Every figure is recalculated from the exports, so each cell uses the right day and the right person.</li>
       <li>Weekends are left out unless "Include weekends" is ticked. Ship counts (the WK SHIP CT columns) aren't in these exports and aren't shown.</li>
     </ul>`;
-  renderTable($('#tFiles'), { cols: [col('File'), col('Team'), col('Report'), col('Rows'), col('Dates')],
-    rows: M.D.files.map((f) => ({ cls: f.kind ? '' : 'muted', c: [cS(f.name), cS(f.team || '–'), cS(f.kind ? (f.kind === 'workbook' ? `${KIND.workbook}: ${f.note}` : KIND[f.kind]) : f.note || 'Skipped'), cN(f.rows), cS(f.from != null ? span(f.from, f.to) : '')] })) });
+  $('#tFiles').innerHTML = `<table><thead><tr><th>File</th><th>Team</th><th>Report</th><th style="text-align:right">Rows</th><th>Dates</th><th></th></tr></thead><tbody>` +
+    M.D.files.map((f) => `<tr class="${f.kind ? '' : 'muted'}"><td>${esc(f.name)}</td><td>${esc(f.team || '–')}</td><td style="text-align:left">${esc(f.kind ? (f.kind === 'workbook' ? `${KIND.workbook}: ${f.note}` : KIND[f.kind]) : f.note || 'Skipped')}</td>` +
+      `<td style="text-align:right">${f.rows ? fmtN(f.rows) : ''}</td><td style="text-align:left">${f.from != null ? esc(span(f.from, f.to)) : ''}</td>` +
+      `<td><button class="cc-x" type="button" data-rm="${esc(f.name)}" title="Take this file out and recalculate">Remove</button></td></tr>`).join('') + '</tbody></table>';
 }
+// Remove one loaded file and re-read the rest (the last one removed goes back to the start screen).
+$('#tFiles').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-rm]'); if (!b) return;
+  for (const [k, it] of LOADED) if (it.path === b.dataset.rm) LOADED.delete(k);
+  if (LOADED.size) readFiles([...LOADED.values()]); else { M = null; L = null; show('start'); }
+});
+$('#filesBtn').addEventListener('click', () => { setTab('names'); requestAnimationFrame(() => $('#tFiles').scrollIntoView({ behavior: 'smooth', block: 'center' })); });
 
 // ---------- render ----------
 function render() {

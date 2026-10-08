@@ -242,3 +242,9 @@
 .cc-check{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--o-ink2);cursor:pointer}
 .cc-check input{margin:0;accent-color:var(--accent)}
 @media (max-width:640px){ .ms-btn{min-width:140px;max-width:200px} }
+.cc-start label.cc-btn-alt{background:transparent;color:var(--link);box-shadow:inset 0 0 0 1px var(--link)}
+.cc-hint{font-size:15px !important;margin-top:16px !important}
+.cc-hint b{font-weight:600;color:var(--text)}
+.cc #tFiles td:last-child{text-align:right}
+.cc-x{font:inherit;font-size:13px;color:var(--crit);background:none;border:0;padding:0 2px;cursor:pointer}
+.cc-x:hover{text-decoration:underline}

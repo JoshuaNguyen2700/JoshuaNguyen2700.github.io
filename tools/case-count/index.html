@@ -18,12 +18,13 @@
   <section class="hero cc-start" id="start">
     <div class="eyebrow">Upload the Cview Report folder</div>
     <h1>Case Count</h1>
-    <p>Your ACTIONED &amp; CLOSED CASE COUNT numbers, filled from the Salesforce exports. Choose the Cview Report folder (the team folders plus the workbook, closed in Excel) to load everything at once.</p>
+    <p>Your ACTIONED &amp; CLOSED CASE COUNT numbers, filled from the Salesforce exports. Upload the .xls reports (and the workbook, closed in Excel), or the whole Cview Report folder.</p>
     <div class="actions">
-      <label class="btn" for="folderInput">Choose folder</label>
-      <label class="link" for="filesInput">Choose files (select several at once)</label>
+      <label class="btn" for="filesInput">Choose files</label>
+      <label class="btn cc-btn-alt" for="folderInput">Choose a folder</label>
     </div>
-    <div class="cc-drop" id="drop">or drop the folder, or the .xls reports, here. You can keep adding more folders or files after the first ones load.</div>
+    <p class="cc-hint">Select several files at once with Ctrl+click or Ctrl+A. Files in different folders? Pick one folder's files, then use <b>Add files</b> for the next.</p>
+    <div class="cc-drop" id="drop">or drop any number of files or folders here. You can keep adding more after the first ones load, and remove any you don't want.</div>
     <p class="cc-privacy">Your files stay on this computer. The browser reads them directly and nothing is sent anywhere.</p>
     <p class="cc-error" id="startError" role="alert" hidden></p>
   </section>
@@ -51,8 +52,9 @@
         <div id="meta"></div>
         <div class="cc-meta-actions">
           <button class="cc-btn cc-btn-primary" id="exportBtn" type="button" title="Download the tables for the current filters as an Excel workbook">Export to Excel</button>
+          <label class="cc-btn" for="addFilesInput" title="Add more report files to what's loaded (select several at once)">Add files</label>
           <label class="cc-btn" for="addFolderInput" title="Add another folder of reports to what's loaded">Add folder</label>
-          <label class="cc-btn" for="addFilesInput" title="Add more report files to what's loaded">Add files</label>
+          <button class="cc-linkbtn" id="filesBtn" type="button" title="See the loaded files and remove any you don't want">Files</button>
           <button class="cc-linkbtn" id="closeBtn" type="button" title="Clear everything and start again">Start over</button>
         </div>
       </div>
