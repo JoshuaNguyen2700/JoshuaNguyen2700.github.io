@@ -43,7 +43,7 @@ function load(data) {
   if (miss.length) notes.push(`No ${miss.map((k) => KN[k]).join(', ')} report was found, so those figures are 0.`);
   if (skipped.length) notes.push(`Skipped: ${skipped.map((f) => `${f.name.split('/').pop()} (${f.note})`).join(', ')}.`);
   const missing = L.fromBook ? L.sections.flatMap((s) => s.rows.filter((r) => r.p < 0).map((r) => `${r.label} (${s.name})`)) : [];
-  if (missing.length) notes.push(`Left out because they aren't in the loaded exports: ${missing.join(', ')}. If that's wrong, pick their Salesforce name on Names & sources.`);
+  if (missing.length) notes.push(`Not in the loaded exports, so blank: ${missing.join(', ')}.`);
   $('#notice').hidden = !notes.length; $('#notice').textContent = notes.join(' ');
   buildFilters(); show('app'); setTab(S.tab);
 }
@@ -225,9 +225,7 @@ const msCust = multiSelect($('#msCust'), { noun: 'customer', plural: 'customers'
 // ---------- filters ----------
 const teamOfRow = (r) => (r.p >= 0 ? M.I.pteam.get(r.p) : null);
 // rows allowed by the supervisor and team chips (before the people list)
-// Workbook names with no data in the loaded exports are left out everywhere (Names & sources still
-// lists them, and picking their Salesforce name there brings them back).
-const inScope = (s, r) => r.p >= 0 && S.secs.has(s.name) && (S.teams.size === M.D.teams.length || S.teams.has(teamOfRow(r)));
+const inScope = (s, r) => S.secs.has(s.name) && (S.teams.size === M.D.teams.length || (r.p >= 0 && S.teams.has(teamOfRow(r))));
 function fillPeople() {
   msPeople.setGroups(L.sections.filter((s) => S.secs.has(s.name)).map((s) => ({ label: L.sections.length > 1 ? s.name : '',
     items: s.rows.filter((r) => inScope(s, r)).map((r) => ({ id: r.key, label: r.label, sub: r.p >= 0 && r.label !== M.D.people[r.p] ? M.D.people[r.p] : r.p < 0 ? 'no data' : '', title: r.p >= 0 ? M.D.people[r.p] : 'Not in the loaded exports' })) }))
