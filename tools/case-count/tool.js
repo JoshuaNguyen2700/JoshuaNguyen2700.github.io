@@ -53,14 +53,14 @@ function show(view) { for (const v of ['start', 'progress', 'app']) $('#' + v).h
 function showStartError(msg) { const e = $('#startError'); e.textContent = msg; e.hidden = !msg; if (msg) show(M ? 'app' : 'start'); }
 const REPORT = /\.(xls|xlsx|xlsm|csv)$/i;
 const reports = (items) => items.filter((it) => REPORT.test(it.file.name) && !/^~\$/.test(it.file.name));
-const NO_REPORTS = 'No report files in that folder. Choose a team folder with the .xls exports (East, Legacy, …) or the Cview Report folder that holds them.';
-// Folders are loaded only as folders: on the start screen each one picked (or dropped) joins a list, and
-// Load reads them all together. Choosing the parent folder brings every folder inside it at once. Once
-// loaded, Add folder (or a drop) adds more and re-reads the whole set, in this page's memory only.
+const NO_REPORTS = 'No report files there. Choose the .xls exports, or the Cview Report folder that holds them.';
+// On the start screen each folder or set of files picked (or dropped) joins a list, and Load reads them
+// all together. Choosing the parent folder brings every folder inside it at once. Once loaded, Add folder,
+// Add files (or a drop) add more and re-read the whole set, in this page's memory only.
 // The same file picked twice counts once.
 let LOADED = new Map(), PENDING = new Map();
 const itemKey = (it) => `${it.file.name}|${it.file.size}|${it.file.lastModified}`;
-const topFolder = (it) => { const p = it.path.split('/'); return p.length > 1 ? p[0] : 'Loose files'; };
+const topFolder = (it) => { const p = it.path.split('/'); return p.length > 1 ? p[0] : 'Files you picked'; };
 function stage(items) {
   items = reports(items);
   if (!items.length) { showStartError(NO_REPORTS); return; }
@@ -77,7 +77,7 @@ function renderPending() {
     const subs = [...new Set(its.map((it) => it.path.split('/').slice(1, -1)[0]).filter(Boolean))];
     return `<li><b>${esc(f)}</b><span>${plural(its.length, 'file')}${subs.length ? ` in ${esc(subs.join(', '))}` : ''}</span><button class="cc-x" type="button" data-unstage="${esc(f)}">Remove</button></li>`;
   }).join('');
-  $('#loadBtn').textContent = n === 1 ? 'Load this folder' : `Load ${n} folders`;
+  $('#loadBtn').textContent = `Load ${plural(PENDING.size, 'file')}`;
   $('#pendingNote').hidden = book || !n;
 }
 $('#pendingList').addEventListener('click', (e) => {
@@ -130,7 +130,9 @@ function readFiles(items) {
 }
 const fromInputEl = (fl) => [...(fl || [])].map((f) => ({ file: f, path: f.webkitRelativePath || f.name }));
 $('#folderInput').addEventListener('change', (e) => { stage(fromInputEl(e.target.files)); e.target.value = ''; });
+$('#filesInput').addEventListener('change', (e) => { stage(fromInputEl(e.target.files)); e.target.value = ''; });
 $('#addFolderInput').addEventListener('change', (e) => { addItems(fromInputEl(e.target.files)); e.target.value = ''; });
+$('#addFilesInput').addEventListener('change', (e) => { addItems(fromInputEl(e.target.files)); e.target.value = ''; });
 $('#cancelBtn').addEventListener('click', () => {
   if (worker) { worker.terminate(); worker = null; }
   if (!M) { PENDING = new Map(LOADED); renderPending(); }   // back to the list, ready to load again
