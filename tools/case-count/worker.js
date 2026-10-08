@@ -194,6 +194,15 @@ function dayOf(v) {
   if (/^\d+(\.\d+)?$/.test(s)) return dayOf(+s);
   return null;
 }
+// The same, to the minute (minutes since 1970-01-01), for the Case History report's Edit Date.
+function minuteOf(v) {
+  const d = dayOf(v); if (d == null) return null;
+  if (typeof v === 'number') return Math.round(v * 1440) - 25569 * 1440;
+  const m = /(\d{1,2}):(\d{2})(?::\d{2})?\s*([AP]M)?/i.exec(String(v).replace(/^\S+\s*/, ''));
+  if (!m) return d * 1440;
+  let h = +m[1] % (m[3] ? 12 : 24); if (m[3] && /p/i.test(m[3])) h += 12;
+  return d * 1440 + h * 60 + +m[2];
+}
 const isCevaMail = (s) => /@([\w-]+\.)*cevalogistics\.com\s*$/i.test(String(s || ''));
 
 // "UScorporate-cs" -> "US Corporate CS", "CSG-USEAST" -> "US East", "Legacy" -> "Legacy"
@@ -209,6 +218,7 @@ function niceName(s) {
 }
 
 function kindOf(h, rows) {
+  if (h.has('edited by') && h.has('edit date') && h.has('new value')) return 'history';
   if (h.has('date/time closed') && h.has('case owner')) return 'closed';
   if (h.has('email message date')) {
     const st = h.get('email status');
@@ -226,7 +236,7 @@ function kindOf(h, rows) {
 // cases they share with files whose team is known, then from the sender on a sent-emails report
 // ("CEVA Ground USEAST" -> East, "CEVA Ground USCORPORATE-LEGACY" -> Legacy), then shared cases again.
 function teamsFromContents(files) {
-  const loose = () => files.filter((f) => !f.team && f.kind && f.kind !== 'workbook');
+  const loose = () => files.filter((f) => !f.team && f.kind && f.kind !== 'workbook' && f.kind !== 'history');   // case history covers every team
   const byCases = () => {
     const caseTeam = new Map();
     for (const f of files) if (f.team && f.cases) for (const cn of f.cases) if (!caseTeam.has(cn)) caseTeam.set(cn, f.team);
@@ -254,7 +264,7 @@ async function build(items) {
   // Phase 1: read every file and keep only the fields we need, keyed so overlapping exports count once.
   // Within one file a key can repeat (two emails in the same minute); across files the larger count wins,
   // and a case owner known from either copy is kept.
-  const K = { sent: new Map(), received: new Map(), closed: new Map() };
+  const K = { sent: new Map(), received: new Map(), closed: new Map(), history: new Map() };
   const merge = (kind, local) => {
     const g = K[kind];
     for (const [k, v] of local) {
@@ -263,9 +273,11 @@ async function build(items) {
       if (v.n > o.n) { if (!v.owner) v.owner = o.owner; g.set(k, v); } else if (!o.owner && v.owner) o.owner = v.owner;
     }
   };
+  // A file at the top of the chosen folder, next to team folders (the workbook, a Case History export), isn't a team.
+  const depth = Math.max(...items.map((it) => (it.path || '').split('/').filter(Boolean).length));
   for (const { file, path } of items) {
     const name = file.name, parts = (path || '').split('/').filter(Boolean);
-    const folder = parts.length >= 2 ? parts[parts.length - 2] : null;
+    const folder = parts.length >= 2 && (parts.length > 2 || depth <= 2) ? parts[parts.length - 2] : null;
     const info = { name, path: path || name, team: folder ? teamLabel(folder) : null, kind: null, rows: 0, from: null, to: null, note: '' };
     files.push(info);
     progress({ file: path || name, pct: 10, stage: 'Reading' });
@@ -289,6 +301,7 @@ async function build(items) {
     const kind = kindOf(H, body);
     if (!kind) { info.note = 'Not a recognised report type'; progress({ file: path || name, pct: 100, stage: info.note, skipped: true }); continue; }
     info.kind = kind;
+    if (kind === 'history') info.team = null;   // one export usually covers every team
     const col = (r, c) => (H.has(c) ? r[H.get(c)] : '');
     const local = new Map(), add = (key, rec) => { const o = local.get(key); if (o) o.n++; else local.set(key, { ...rec, n: 1 }); };
     const span = (d) => { if (d == null) return; if (info.from == null || d < info.from) info.from = d; if (info.to == null || d > info.to) info.to = d; };
@@ -304,6 +317,12 @@ async function build(items) {
         const key = [cn, norm(col(r, 'email message date')), norm(col(r, 'from name')), norm(col(r, 'email subject'))].join('\u0001');
         if (kind === 'sent') add(key, { owner, cn, day, folder: info.team, fi: files.length - 1 });
         else add(key, { owner, cn, day, folder: info.team, fi: files.length - 1, company: norm(col(r, 'company name')), ceva: isCevaMail(col(r, 'web email')) });
+      } else if (kind === 'history') {
+        // a status change into a Closed status from an open one (Closed-Resolved -> Closed-No Action Needed is not a new close)
+        if (!/^closed/i.test(norm(col(r, 'new value'))) || /^closed/i.test(norm(col(r, 'old value')))) continue;
+        const at = minuteOf(col(r, 'edit date')); if (at == null) continue;
+        span(Math.floor(at / 1440));
+        add(cn + '\u0001' + at, { owner, cn, at, day: Math.floor(at / 1440), folder: null, fi: files.length - 1 });
       } else {
         const day = dayOf(col(r, 'date/time closed')); if (day == null) continue;
         span(day);
@@ -315,8 +334,40 @@ async function build(items) {
     progress({ file: path || name, pct: 100, rows: info.rows, kind });
   }
   if (!files.some((f) => f.kind && f.kind !== 'workbook')) throw new Error('None of these files look like Salesforce case or email reports. Choose the Cview Report folder, or the .xls exports in its team folders.');
+  // With a Case History export, CASES CLOSED is counted the way the workbook was filled in, from a report
+  // pulled the next day: a case counts on the day it was closed, for its owner, unless it was closed again
+  // within 24 hours (it had reopened), in which case only that later close counts. The Closed Cases per
+  // Agent report is the fallback; it only lists cases that are still closed now, so it runs low.
+  if (K.history.size) {
+    const byCase = new Map();
+    for (const v of K.history.values()) { const a = byCase.get(v.cn); if (a) a.push(v); else byCase.set(v.cn, [v]); }
+    const kept = new Map();
+    for (const evs of byCase.values()) {
+      evs.sort((a, b) => a.at - b.at);
+      evs.forEach((v, i) => {
+        const next = evs[i + 1];
+        if (next && next.day === v.day) return;          // closed again later the same day
+        if (next && next.at - v.at < 24 * 60) return;     // reopened and closed again within 24 hours
+        kept.set(v.cn + '\u0001' + v.at, { ...v, n: 1 });
+      });
+    }
+    K.closed = kept;
+  }
   teamsFromContents(files);
   for (const kind of ['sent', 'closed', 'received']) for (const v of K[kind].values()) if (!v.folder && v.fi != null) v.folder = files[v.fi].team;
+  // Closures from Case History take the team of the case in the other reports.
+  if (K.history.size) {
+    const caseTeam = new Map();
+    for (const f of files) if (f.team && f.cases && f.kind !== 'history') for (const cn of f.cases) if (!caseTeam.has(cn)) caseTeam.set(cn, f.team);
+    // A history export run for all cases also holds other countries' teams: keep a closure only when its case is in
+    // the team reports or its owner is someone in them.
+    const known = new Set();
+    for (const kind of ['sent', 'received']) for (const v of K[kind].values()) if (v.owner) known.add(v.owner.toLowerCase());
+    for (const [k, v] of K.closed) {
+      if (!v.folder) v.folder = caseTeam.get(v.cn) || null;
+      if (!v.folder && !known.has((v.owner || '').toLowerCase())) K.closed.delete(k);
+    }
+  }
 
   // Phase 2: who owns each case, and which team folder each person belongs to.
   const caseOwner = new Map();
@@ -348,7 +399,7 @@ async function build(items) {
   // A file picked on its own (no team folder in its path) takes the team most of its case owners belong to.
   const fileVotes = files.map(() => new Map());
   for (const kind of ['sent', 'closed', 'received']) for (const v of K[kind].values()) if (v.pk && v.fi != null) { const m = fileVotes[v.fi], h = home.get(v.pk); m.set(h, (m.get(h) || 0) + v.n); }
-  files.forEach((f, i) => { if (!f.team && f.kind && f.kind !== 'workbook') { const best = [...fileVotes[i]].sort((a, b) => b[1] - a[1])[0]; if (best) f.team = best[0]; } });
+  files.forEach((f, i) => { if (!f.team && f.kind && f.kind !== 'workbook' && f.kind !== 'history') { const best = [...fileVotes[i]].sort((a, b) => b[1] - a[1])[0]; if (best) f.team = best[0]; } });
   const teamFor = (v) => T(v.pk ? home.get(v.pk) : v.folder || (v.fi != null && files[v.fi].team) || null);
   const tally = (map, key, n) => map.set(key, (map.get(key) || 0) + n);
   const act = new Map(), clo = new Map(), inb = new Map();

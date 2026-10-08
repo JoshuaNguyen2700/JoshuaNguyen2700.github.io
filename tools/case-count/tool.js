@@ -38,7 +38,7 @@ function load(data) {
   const usable = M.D.files.filter((f) => f.kind && f.kind !== 'workbook'), skipped = M.D.files.filter((f) => !f.kind);
   $('#meta').textContent = `${plural(usable.length, 'report')} · ${span(M.X.lo, M.X.hi)}`;
   const KN = { sent: 'sent emails (cases actioned)', received: 'received emails', closed: 'closed cases' }, notes = [];
-  const miss = Object.keys(KN).filter((k) => !usable.some((f) => f.kind === k));
+  const miss = Object.keys(KN).filter((k) => !usable.some((f) => f.kind === k || (k === 'closed' && f.kind === 'history')));
   if (!L.fromBook) notes.push('The ACTIONED & CLOSED CASE COUNT workbook wasn\'t in the files, so people are grouped by team folder with their full names. Load the Cview Report folder with the workbook in it (closed in Excel) to get the supervisor sections, names and customer rows.');
   if (miss.length) notes.push(`No ${miss.map((k) => KN[k]).join(', ')} report was found, so those figures are 0.`);
   if (skipped.length) notes.push(`Skipped: ${skipped.map((f) => `${f.name.split('/').pop()} (${f.note})`).join(', ')}.`);
@@ -110,7 +110,7 @@ function readFiles(items) {
   count(); show('progress');
   if (worker) worker.terminate();
   worker = new Worker(new URL('worker.js', import.meta.url));
-  const KIND = { sent: 'emails sent', received: 'emails received', closed: 'cases closed' };
+  const KIND = { sent: 'emails sent', received: 'emails received', closed: 'cases closed', history: 'case history rows' };
   worker.onmessage = (e) => {
     const m = e.data;
     if (m.type === 'progress') {
@@ -423,12 +423,12 @@ $('#p-names').addEventListener('change', (e) => {
   const s = e.target.closest('select[data-key]'); if (!s) return;
   OVR.set(s.dataset.key, +s.value); L = buildLayout(M, OVR); fillPeople(); fillCustomers(); renderNames();
 });
-const KIND = { sent: 'Emails sent (cases actioned)', received: 'Emails received', closed: 'Cases closed', workbook: 'Workbook layout' };
+const KIND = { sent: 'Emails sent (cases actioned)', received: 'Emails received', closed: 'Cases closed', history: 'Case history (cases closed)', workbook: 'Workbook layout' };
 function about() {
   $('#about').innerHTML = `<h2>How the numbers are calculated</h2>
     <ul>
       <li><b>CASES ACTIONED</b>: every row of the sent-emails report (Sent, Replied and Draft) on the cases a person owns, on the email's date.</li>
-      <li><b>CASES CLOSED</b>: cases whose Date/Time Closed falls on that day, credited to the case's current owner. Salesforce keeps only a case's latest close, so closures that were later reopened, or cases now owned by a queue, aren't counted. That's why closed can run lower than numbers typed into the workbook on the day.</li>
+      <li><b>CASES CLOSED</b>: from the Case History report when it is loaded (Status changed to a Closed status). A case counts on the day it was closed, for its owner, unless it was closed again within 24 hours (it had reopened); then only the later close counts. That matches the workbook, which was filled in from a report pulled the next day. Without Case History, the Closed Cases per Agent report is used; it only lists cases that are still closed now, so closures that later reopened are missing and it runs low.</li>
       <li><b>TOTAL</b> columns add up each Monday-to-Friday week; <b>TOTALS</b> rows add up everyone shown.</li>
       <li><b>CUST E-MAILS</b>: each customer row counts every email received for the Salesforce companies matched to it (listed above), whoever owns the case. <b>E-MAILS FROM CEVA STATIONS</b> are emails from @cevalogistics.com addresses on the rep's cases. <b>TOTAL</b> = customer rows + CEVA stations. <b>E-MAILS ACTIONED</b> = the rep's cases actioned + cases closed. <b>% ACTIONED</b> = E-MAILS ACTIONED ÷ TOTAL, goal 85%. A mailbox block (a name with dates beside it) counts every email received for that company, against its rep's actioned + closed.</li>
       <li>Every figure is recalculated from the exports, so each cell uses the right day and the right person.</li>
