@@ -32,7 +32,9 @@ const dflt = () => ({ secs: new Set(L.sections.map((s) => s.name)), teams: new S
 
 function load(data) {
   M = prepare(data); OVR.clear(); L = buildLayout(M, OVR);
-  S = { ...dflt(), tab: TABS.includes(saved.tab) ? saved.tab : 'over', weekends: !!saved.weekends };
+  // after adding or removing files, stay on the tab that was open
+  const tab = S ? S.tab : saved.tab, weekends = S ? S.weekends : !!saved.weekends;
+  S = { ...dflt(), tab: TABS.includes(tab) ? tab : 'over', weekends };
   const usable = M.D.files.filter((f) => f.kind && f.kind !== 'workbook'), skipped = M.D.files.filter((f) => !f.kind);
   $('#meta').textContent = `${plural(usable.length, 'report')} · ${span(M.X.lo, M.X.hi)}`;
   const KN = { sent: 'sent emails (cases actioned)', received: 'received emails', closed: 'closed cases' }, notes = [];
