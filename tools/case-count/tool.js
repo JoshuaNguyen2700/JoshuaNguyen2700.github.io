@@ -52,19 +52,45 @@ function load(data) {
 function show(view) { for (const v of ['start', 'progress', 'app']) $('#' + v).hidden = v !== view; if (view !== 'app') hideTip(); }
 function showStartError(msg) { const e = $('#startError'); e.textContent = msg; e.hidden = !msg; if (msg) show(M ? 'app' : 'start'); }
 const REPORT = /\.(xls|xlsx|xlsm|csv)$/i;
-// Everything picked so far, so folders and files can be added a few at a time; each addition re-reads
-// the whole set (in this page's memory only) and the same file picked twice counts once.
-let LOADED = new Map();
+const reports = (items) => items.filter((it) => REPORT.test(it.file.name) && !/^~\$/.test(it.file.name));
+const NO_REPORTS = 'No report files in that folder. Choose a team folder with the .xls exports (East, Legacy, …) or the Cview Report folder that holds them.';
+// Folders are loaded only as folders: on the start screen each one picked (or dropped) joins a list, and
+// Load reads them all together. Choosing the parent folder brings every folder inside it at once. Once
+// loaded, Add folder (or a drop) adds more and re-reads the whole set, in this page's memory only.
+// The same file picked twice counts once.
+let LOADED = new Map(), PENDING = new Map();
 const itemKey = (it) => `${it.file.name}|${it.file.size}|${it.file.lastModified}`;
-function addItems(items, merge) {
-  items = items.filter((it) => REPORT.test(it.file.name) && !/^~\$/.test(it.file.name));
-  if (!items.length) {
-    const msg = 'No report files there. Choose the Cview Report folder, or the .xls exports in its team folders.';
-    if (merge && M) { $('#notice').hidden = false; $('#notice').textContent = msg; } else showStartError(msg);
-    return;
-  }
-  if (!merge) LOADED = new Map();
-  for (const it of items) { const k = itemKey(it), old = LOADED.get(k); if (!old || (it.path.includes('/') && !old.path.includes('/'))) LOADED.set(k, it); }
+const topFolder = (it) => { const p = it.path.split('/'); return p.length > 1 ? p[0] : 'Loose files'; };
+function stage(items) {
+  items = reports(items);
+  if (!items.length) { showStartError(NO_REPORTS); return; }
+  showStartError('');
+  for (const it of items) { const k = itemKey(it); if (!PENDING.has(k)) PENDING.set(k, it); }
+  renderPending();
+}
+function renderPending() {
+  const groups = new Map();
+  for (const it of PENDING.values()) { const f = topFolder(it); groups.set(f, [...(groups.get(f) || []), it]); }
+  const n = groups.size, book = [...PENDING.values()].some((it) => /\.xls[xm]$/i.test(it.file.name));
+  $('#pending').hidden = !n; $('#pickRow').hidden = !!n;
+  $('#pendingList').innerHTML = [...groups].map(([f, its]) => {
+    const subs = [...new Set(its.map((it) => it.path.split('/').slice(1, -1)[0]).filter(Boolean))];
+    return `<li><b>${esc(f)}</b><span>${plural(its.length, 'file')}${subs.length ? ` in ${esc(subs.join(', '))}` : ''}</span><button class="cc-x" type="button" data-unstage="${esc(f)}">Remove</button></li>`;
+  }).join('');
+  $('#loadBtn').textContent = n === 1 ? 'Load this folder' : `Load ${n} folders`;
+  $('#pendingNote').hidden = book || !n;
+}
+$('#pendingList').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-unstage]'); if (!b) return;
+  for (const [k, it] of PENDING) if (topFolder(it) === b.dataset.unstage) PENDING.delete(k);
+  renderPending();
+});
+$('#loadBtn').addEventListener('click', () => { if (!PENDING.size) return; LOADED = new Map(PENDING); PENDING = new Map(); renderPending(); readFiles([...LOADED.values()]); });
+// After the first load: add more folders to what's loaded and read everything again.
+function addItems(items) {
+  items = reports(items);
+  if (!items.length) { $('#notice').hidden = false; $('#notice').textContent = NO_REPORTS; return; }
+  for (const it of items) { const k = itemKey(it); if (!LOADED.has(k)) LOADED.set(k, it); }
   readFiles([...LOADED.values()]);
 }
 // The files in the last read, in the order the worker lists them (two files can share a name).
@@ -103,12 +129,14 @@ function readFiles(items) {
   worker.postMessage({ files: items });
 }
 const fromInputEl = (fl) => [...(fl || [])].map((f) => ({ file: f, path: f.webkitRelativePath || f.name }));
-$('#folderInput').addEventListener('change', (e) => { addItems(fromInputEl(e.target.files), !!M); e.target.value = ''; });
-$('#filesInput').addEventListener('change', (e) => { addItems(fromInputEl(e.target.files), !!M); e.target.value = ''; });
-$('#addFolderInput').addEventListener('change', (e) => { addItems(fromInputEl(e.target.files), true); e.target.value = ''; });
-$('#addFilesInput').addEventListener('change', (e) => { addItems(fromInputEl(e.target.files), true); e.target.value = ''; });
-$('#cancelBtn').addEventListener('click', () => { if (worker) { worker.terminate(); worker = null; } show(M ? 'app' : 'start'); });
-$('#closeBtn').addEventListener('click', () => { M = null; L = null; LOADED = new Map(); show('start'); });
+$('#folderInput').addEventListener('change', (e) => { stage(fromInputEl(e.target.files)); e.target.value = ''; });
+$('#addFolderInput').addEventListener('change', (e) => { addItems(fromInputEl(e.target.files)); e.target.value = ''; });
+$('#cancelBtn').addEventListener('click', () => {
+  if (worker) { worker.terminate(); worker = null; }
+  if (!M) { PENDING = new Map(LOADED); renderPending(); }   // back to the list, ready to load again
+  show(M ? 'app' : 'start');
+});
+$('#closeBtn').addEventListener('click', () => { M = null; L = null; LOADED = new Map(); PENDING = new Map(); renderPending(); show('start'); });
 
 // Dropped folders are walked so each report keeps its team folder in its path.
 async function dropItems(dtf) {
@@ -130,7 +158,7 @@ document.addEventListener('dragover', (e) => e.preventDefault());
 document.addEventListener('drop', (e) => {
   e.preventDefault(); dragDepth = 0; document.body.classList.remove('dragging');
   if (worker || !e.dataTransfer) return;
-  dropItems(e.dataTransfer).then((items) => addItems(items, !!M), (err) => showStartError('Those files could not be opened: ' + err.message));
+  dropItems(e.dataTransfer).then((items) => (M ? addItems(items) : stage(items)), (err) => showStartError('Those folders could not be opened: ' + err.message));
 });
 
 // ---------- multi-select list ----------
@@ -416,7 +444,7 @@ $('#tFiles').addEventListener('click', (e) => {
   const b = e.target.closest('[data-rm]'); if (!b) return;
   const gone = READ[+b.dataset.rm];
   for (const [k, it] of LOADED) if (it === gone) LOADED.delete(k);
-  if (LOADED.size) readFiles([...LOADED.values()]); else { M = null; L = null; show('start'); }
+  if (LOADED.size) readFiles([...LOADED.values()]); else { M = null; L = null; renderPending(); show('start'); }
 });
 $('#filesBtn').addEventListener('click', () => { setTab('names'); requestAnimationFrame(() => $('#tFiles').scrollIntoView({ behavior: 'smooth', block: 'center' })); });
 

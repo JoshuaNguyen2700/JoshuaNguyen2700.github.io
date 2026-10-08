@@ -254,3 +254,12 @@
 .field .ms-list label small{font-size:12px;color:var(--muted);text-transform:none;letter-spacing:normal}
 .cc #tFiles th,.cc #tFiles td{text-align:left}
 .cc #tFiles th:nth-child(4),.cc #tFiles td:nth-child(4),.cc #tFiles td:last-child{text-align:right}
+.cc-pending{margin:28px auto 0;max-width:520px;text-align:left}
+.cc-pending ul{list-style:none;margin:0;padding:0;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--o-card)}
+.cc-pending li{display:flex;align-items:baseline;gap:10px;padding:10px 14px;font-size:15px;border-bottom:1px solid var(--line)}
+.cc-pending li:last-child{border-bottom:0}
+.cc-pending li b{font-weight:600}
+.cc-pending li span{color:var(--muted);font-size:13px;flex:1;min-width:0}
+.cc-pending .actions{justify-content:flex-start;margin-top:18px}
+.cc-pending .actions .btn{margin-top:0;border:0;font:inherit;font-size:17px;cursor:pointer}
+.cc-pending .cc-hint{text-align:left}
