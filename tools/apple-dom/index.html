@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Apple DOM Charts · Joshua Nguyen</title>
+<meta name="description" content="Drop the APPLE_AMR export to fill the weekly Apple Dom Charts Template and get the PPT tables. Files stay on your computer.">
+<!-- Shared bus: absolute paths. This tool's own files: relative paths. -->
+<link rel="stylesheet" href="/assets/bus.css">
+<script src="/assets/core/theme.js"></script>
+<link rel="stylesheet" href="tool.css">
+</head>
+<body>
+<header data-shell="nav"></header>
+
+<main>
+  <!-- Shown until the AMR file is opened. No shipment data or template is ever stored in this website. -->
+  <section class="hero ad-start" id="start">
+    <div class="eyebrow">Apple domestic weekly OTP</div>
+    <h1>Apple DOM Charts</h1>
+    <p>Drop the <b>APPLE_AMR</b> export to fill this week's Charts Template and get the PowerPoint tables.</p>
+    <div class="actions">
+      <label class="btn" for="fileInput">Choose files</label>
+    </div>
+    <div class="ad-drop" id="drop">or drop the APPLE_AMR .xlsx here<span id="tplAsk"> together with the <b>Apple Dom Charts Template</b> .xlsx (needed the first time only)</span>.</div>
+    <p class="ad-tpl" id="tplStatus"></p>
+    <p class="ad-privacy">Your files stay on this computer. The browser reads them directly and nothing is sent anywhere.</p>
+    <p class="ad-error" id="startError" role="alert" hidden></p>
+  </section>
+
+  <section class="ad-progress" id="progress" hidden aria-live="polite">
+    <h2>Reading the APPLE_AMR file</h2>
+    <p class="sub" id="progressName"></p>
+    <div class="bar"><i id="progressBar"></i></div>
+  </section>
+  <input type="file" id="fileInput" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple hidden>
+  <input type="file" id="tplInput" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
+
+  <div class="ad" id="app" hidden>
+    <header class="ad-head">
+      <div>
+        <div class="eyebrow" id="headEyebrow">Apple domestic OTP</div>
+        <h1 id="headTitle">Week</h1>
+        <div class="ad-week">
+          <label for="weekSel">Due week</label>
+          <select id="weekSel"></select>
+          <span class="sub" id="weekDates"></span>
+        </div>
+      </div>
+      <div class="ad-meta">
+        <div id="meta"></div>
+        <div class="ad-meta-actions">
+          <button class="ad-btn ad-btn-primary" id="dlBtn" type="button" disabled>Download filled template</button>
+          <label class="ad-btn" for="fileInput">Load new files</label>
+          <label class="ad-linkbtn" for="tplInput" title="Use a different Charts Template file from now on">Replace template</label>
+        </div>
+      </div>
+    </header>
+    <p class="ad-error" id="appError" role="alert" hidden></p>
+    <p class="ad-saved" id="dlNote" role="status" hidden></p>
+    <div class="ad-notes" id="notes"></div>
+
+    <section class="tiles-k" id="kpis" aria-label="Headline figures"></section>
+
+    <nav class="ad-tabs" role="tablist" aria-label="Views">
+      <button class="tab" role="tab" id="tab-charts" aria-controls="panel-charts" aria-selected="true" data-tab="charts">Template charts</button>
+      <button class="tab" role="tab" id="tab-ppt" aria-controls="panel-ppt" aria-selected="false" data-tab="ppt">PowerPoint tables</button>
+    </nav>
+
+    <section class="panel" id="panel-charts" role="tabpanel" aria-labelledby="tab-charts">
+      <div class="chips" id="sheetChips" aria-label="Template tab"></div>
+      <div class="grid2" id="otdCards"></div>
+      <div class="grid2" id="paretoCards"></div>
+    </section>
+
+    <section class="panel" id="panel-ppt" role="tabpanel" aria-labelledby="tab-ppt" hidden>
+      <div class="grid2">
+        <div class="card" id="s4"></div>
+        <div class="card" id="s6"></div>
+      </div>
+      <div class="card" id="s5"></div>
+      <div class="card" id="s8"></div>
+    </section>
+  </div>
+</main>
+
+<div id="tip" hidden></div>
+<footer data-shell="footer"></footer>
+<script type="module" src="/assets/core/shell.js"></script>
+<script type="module" src="tool.js"></script>
+</body>
+</html>

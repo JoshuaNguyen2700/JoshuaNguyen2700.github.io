@@ -49,7 +49,7 @@ function parts(serial) {
 // ---------- zip access ----------
 async function bytes(blob, a, b) { return new Uint8Array(await blob.slice(a, b).arrayBuffer()); }
 
-async function listZip(blob) {
+export async function listZip(blob) {
   const tailLen = Math.min(blob.size, 65557 + 20), tail = await bytes(blob, blob.size - tailLen, blob.size);
   const dv = new DataView(tail.buffer);
   let p = -1;
@@ -79,7 +79,7 @@ async function listZip(blob) {
   return entries;
 }
 
-async function entryReader(blob, e, onBytes, binary = false) {
+export async function entryReader(blob, e, onBytes, binary = false) {
   const lh = new DataView((await bytes(blob, e.off, e.off + 30)).buffer);
   const start = e.off + 30 + lh.getUint16(26, true) + lh.getUint16(28, true);
   let s = blob.slice(start, start + e.csize).stream();
@@ -88,7 +88,7 @@ async function entryReader(blob, e, onBytes, binary = false) {
   else if (e.method !== 0) throw new Error('uses an unsupported zip compression method');
   return (binary ? s : s.pipeThrough(new TextDecoderStream())).getReader();
 }
-async function entryText(blob, e) {
+export async function entryText(blob, e) {
   const r = await entryReader(blob, e); let t = '';
   for (;;) { const { value, done } = await r.read(); if (value) t += value; if (done) return t; }
 }
@@ -246,7 +246,7 @@ function binCell(type, buf, dv, p, wantF) {
 // ---------- a workbook, either format ----------
 // book.cells(entry, { want(c, r), onCell(r, c, value, formula), onRowEnd(r) -> false to stop, formulas, onBytes })
 // book.sharedStrings(need) -> Map(index -> text) for the indices in `need`
-async function openBook(file) {
+export async function openBook(file) {
   const z = await listZip(file);
   const bin = z.get('xl/workbook.bin'), wbE = bin || z.get('xl/workbook.xml');
   if (!wbE) throw new Error('is not an Excel workbook');

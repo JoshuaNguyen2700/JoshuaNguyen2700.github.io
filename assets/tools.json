@@ -31,11 +31,11 @@
       "icon": "chart"
     },
     {
-      "id": "tool-5",
-      "name": "Tool 5",
-      "blurb": "A new tool is on the way.",
-      "status": "soon",
-      "icon": "plus"
+      "id": "apple-dom",
+      "name": "Apple DOM Charts",
+      "blurb": "Weekly OTD & delay codes",
+      "status": "live",
+      "icon": "chart"
     },
     {
       "id": "tool-6",
