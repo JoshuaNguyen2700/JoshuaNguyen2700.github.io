@@ -30,7 +30,8 @@ self.onmessage = async (e) => {
       self.postMessage({ type: 'result', sel: m.sel, blob: res.blob, fileName: res.blob ? outName(m.sel) : null, tabs: res.tabs, warnings: res.warnings, quarter: res.quarter, template: res.template || null, ppt });
     } else if (m.type === 'deck') {
       if (!LAST || LAST.sel.wk !== m.sel.wk || LAST.sel.fy !== m.sel.fy) throw new Error('Fill the template for this week first.');
-      const out = await buildDeck(m.deck, { sel: LAST.sel, fileDate: fileDate(AMR.name), ppt: LAST.ppt, s8: m.s8, charts: LAST.charts, xlsx: LAST.xlsx });
+      // title slide date: the day the deck is exported (the viewer's own calendar day)
+      const out = await buildDeck(m.deck, { sel: LAST.sel, date: m.date ?? fileDate(AMR.name), ppt: LAST.ppt, s8: m.s8, charts: LAST.charts, xlsx: LAST.xlsx });
       self.postMessage({ type: 'deck', blob: out.blob, fileName: deckName(LAST.sel), warnings: out.warnings });
     }
   } catch (err) {

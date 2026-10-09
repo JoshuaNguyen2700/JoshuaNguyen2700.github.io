@@ -122,7 +122,7 @@ function pptChartXml(x) {
   return x.replace(/<\/c:chartSpace>\s*$/, ext + '</c:chartSpace>');
 }
 
-// opts: { sel, fileDate (ms), ppt (pptTables result), s8: 'no' | 'with', charts: [{ sheet, title, xml }], xlsx: Uint8Array }
+// opts: { sel, date (ms, UTC midnight of the export day), ppt (pptTables result), s8: 'no' | 'with', charts: [{ sheet, title, xml }], xlsx: Uint8Array }
 export async function buildDeck(deckBlob, opts) {
   const files = await unzip(deckBlob), warnings = [];
   const { sel, ppt } = opts, Q = quarterOf(sel.fy, sel.wk), yy = String(sel.fy).slice(2);
@@ -130,7 +130,7 @@ export async function buildDeck(deckBlob, opts) {
   const slides = [...pres.matchAll(/<p:sldId\b[^>]*r:id="([^"]+)"/g)].map((m) => presRels.find((r) => r.id === m[1])?.target).filter((p) => p && files.has(p));
   let ct = dec.decode(files.get('[Content_Types].xml'));
   let chartNo = Math.max(0, ...[...files.keys()].map((n) => +(/^ppt\/charts\/chart(\d+)\.xml$/.exec(n)?.[1] || 0)));
-  const d = new Date(opts.fileDate), day = d.getUTCDate();
+  const d = new Date(opts.date ?? opts.fileDate), day = d.getUTCDate();
   const done = new Set();
 
   for (const path of slides) {
@@ -233,6 +233,11 @@ export async function buildDeck(deckBlob, opts) {
   return { blob: new Blob([blob], { type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' }), warnings };
 }
 
+// Title slide text, e.g. { line: 'FY27 FW2 Operational Business Review', date: 'October 09th, 2026' }
+export function titleText(sel, date) {
+  const d = new Date(date), day = d.getUTCDate();
+  return { line: `FY${String(sel.fy).slice(2)} FW${sel.wk} Operational Business Review`, date: `${MONTHS[d.getUTCMonth()]} ${String(day).padStart(2, '0')}${ordinal(day)}, ${d.getUTCFullYear()}` };
+}
 export const deckName = (sel) => `Apple-CEVA FW${sel.wk} FY${String(sel.fy).slice(2)} Dom Weekly OTP Report.pptx`;
 export async function isDeck(blob) {
   try { const files = await unzip(blob); return files.has('ppt/presentation.xml'); } catch (e) { return false; }
