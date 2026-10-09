@@ -4,7 +4,6 @@
 // Nothing is uploaded; the template is kept in this browser's IndexedDB so later weeks only need the AMR file.
 import { esc } from '/assets/core/util.js';
 import { quarterOf, weekRange, slide8Text } from './model.js';
-import { titleText } from './deck.js';
 
 const $ = (s) => document.querySelector(s);
 const fmtN = (n) => (n == null ? '–' : Math.round(n).toLocaleString('en-US'));
@@ -125,8 +124,6 @@ function render(note) {
     if (t.missing && t.missing.length) notes.push(`<b class="warn">${t.missing.map(qw).join(', ')} ${t.missing.length > 1 ? 'are' : 'is'} empty in this template.</b> Add ${t.missing.length > 1 ? 'those weeks' : 'that week'} first (that week's APPLE_AMR file with the earlier template), or the quarter will have a gap.`);
     if (t.later && t.later.length) notes.push(`This template already has ${t.later.map(qw).join(', ')}, later than FW${R.sel.wk}; ${t.later.length > 1 ? 'they were' : 'it was'} kept.`);
     notes.push('Downloading saves the filled file in this browser as next week\'s template, so next week you only drop the new APPLE_AMR file.');
-    const tt = titleText(R.sel, exportDay());
-    notes.push(`PowerPoint title slide: <b>${esc(tt.line)}</b>, dated <b>${esc(tt.date)}</b> (the day you export; fiscal week from Apple's FY${String(R.sel.fy).slice(2)} calendar, FW${R.sel.wk} = ${fmtD(weekRange(R.sel.fy, R.sel.wk)[0])} – ${fmtD(weekRange(R.sel.fy, R.sel.wk)[1])}).`);
     notes.push('Late units with no delay code are left out of the Paretos, like the pivots. OEM tabs (one Pareto) count FTL and LTL together.');
   }
   for (const w of R.warnings || []) notes.push(esc(w));
