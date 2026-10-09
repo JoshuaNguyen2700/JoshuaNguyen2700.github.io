@@ -18,11 +18,11 @@
   <section class="hero ad-start" id="start">
     <div class="eyebrow">Apple domestic weekly OTP</div>
     <h1>Apple DOM Charts</h1>
-    <p>Drop the <b>APPLE_AMR</b> export to fill this week's Charts Template and get the PowerPoint tables.</p>
+    <p>Drop the <b>APPLE_AMR</b> export to fill this week's Charts Template and build the weekly PowerPoint.</p>
     <div class="actions">
       <label class="btn" for="fileInput">Choose files</label>
     </div>
-    <div class="ad-drop" id="drop">or drop the APPLE_AMR .xlsx here<span id="tplAsk"> together with the <b>Apple Dom Charts Template</b> .xlsx (needed the first time only)</span>.</div>
+    <div class="ad-drop" id="drop">or drop the APPLE_AMR .xlsx here<span id="tplAsk">, with last week's <b>Apple Dom Charts Template</b> .xlsx</span><span id="deckAsk">, and last week's <b>PowerPoint</b> .pptx</span>. After the first week, only the APPLE_AMR file is needed.</div>
     <p class="ad-tpl" id="tplStatus"></p>
     <p class="ad-privacy">Your files stay on this computer. The browser reads them directly and nothing is sent anywhere.</p>
     <p class="ad-error" id="startError" role="alert" hidden></p>
@@ -33,7 +33,8 @@
     <p class="sub" id="progressName"></p>
     <div class="bar"><i id="progressBar"></i></div>
   </section>
-  <input type="file" id="fileInput" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" multiple hidden>
+  <input type="file" id="fileInput" accept=".xlsx,.pptx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.openxmlformats-officedocument.presentationml.presentation" multiple hidden>
+  <input type="file" id="deckInput" accept=".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation" hidden>
   <input type="file" id="tplInput" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden>
 
   <div class="ad" id="app" hidden>
@@ -51,8 +52,10 @@
         <div id="meta"></div>
         <div class="ad-meta-actions">
           <button class="ad-btn ad-btn-primary" id="dlBtn" type="button" disabled>Download filled template</button>
+          <button class="ad-btn ad-btn-primary" id="pptBtn" type="button" disabled>Download PowerPoint</button>
           <label class="ad-btn" for="fileInput">Load new files</label>
           <label class="ad-linkbtn" for="tplInput" title="Use a different Charts Template file from now on">Replace template</label>
+          <label class="ad-linkbtn" for="deckInput" title="Use a different PowerPoint as the starting deck">Replace deck</label>
         </div>
       </div>
     </header>

@@ -201,6 +201,16 @@ export function pptTables(recs, sel, qtd = null) {
   return { s4, s5, s6, s8: { withAC: s8(ALL), noAC: s8(NOAC) } };
 }
 
+// Slide 8 comments: the BK/HB consignee split, then the other late reasons largest first, worded like past decks.
+const REASON = [[/^AM\b/i, 'Late booking'], [/^S6\b/i, 'Late Handover'], [/^P1\b/i, 'Processing Delay'], [/^A1\b/i, 'Missed Delivery'],
+  [/^V1\b/i, 'Pieces Flight Related Delay'], [/^C6\b/i, 'Waiting Shipment Instructions'], [/^BS\b/i, 'Refused by Customer'], [/^AN\b/i, 'Holiday']];
+export function slide8Text(s8) {
+  const top = s8.brands.slice(0, 5);
+  const first = s8.bkTotal ? `For BK & HB customer appointment issue, ${top.map((b) => `${(100 * b.units / s8.bkTotal).toFixed(1)}% by ${b.brand}`).join('; ')}` : 'No BK or HB customer appointment delays this week';
+  const lines = s8.pareto.items.filter(([c]) => !/^(BK|HB)\b/i.test(c)).slice(0, 5).map(([c, v]) => `${Math.round(v)} ${(REASON.find(([re]) => re.test(c)) || [0, shortCode(c)])[1]}`);
+  return [first, ...lines];
+}
+
 // ---------- xlsx editing (template) ----------
 const ENT = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
 const unx = (t) => t.replace(/&(#x[0-9a-f]+|#\d+|\w+);/gi, (m, e) => e[0] === '#' ? String.fromCodePoint(e[1] === 'x' || e[1] === 'X' ? parseInt(e.slice(2), 16) : +e.slice(1)) : ENT[e] ?? m);
@@ -215,7 +225,7 @@ async function entryBytes(blob, e) {
   for (;;) { const { value, done } = await r.read(); if (value) { parts.push(value); n += value.length; } if (done) break; }
   const out = new Uint8Array(n); let o = 0; for (const p of parts) { out.set(p, o); o += p.length; } return out;
 }
-async function unzip(blob) {
+export async function unzip(blob) {
   const list = await listZip(blob), files = new Map();
   for (const [name, e] of list) files.set(name, await entryBytes(blob, e));
   return files;
@@ -223,7 +233,7 @@ async function unzip(blob) {
 const CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
 const crc32 = (b) => { let c = 0xFFFFFFFF; for (let i = 0; i < b.length; i++) c = CRC[(c ^ b[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
 async function deflate(b) { return new Uint8Array(await new Response(new Blob([b]).stream().pipeThrough(new CompressionStream('deflate-raw'))).arrayBuffer()); }
-async function zip(files) {
+export async function zip(files) {
   const enc = new TextEncoder(), parts = [], cd = []; let off = 0;
   const d = new Date(), dt = ((d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1)) & 0xFFFF, dd = (((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate()) & 0xFFFF;
   for (const [name, data] of files) {
@@ -269,6 +279,18 @@ class Sheet {
     this.expandShared();
   }
   cell(r, c) { return this.rows.get(r)?.cells.get(c); }
+  // column width / row height in EMU, from <cols> and row heights (Excel: 7px per character, 9525 EMU per pixel)
+  colEmu(c) {
+    if (!this.cols) {
+      this.cols = [...this.pre.matchAll(/<col\b([^>]*)\/?>/g)].map((m) => ({ min: +attr(m[1], 'min') - 1, max: +attr(m[1], 'max') - 1, w: +attr(m[1], 'width'), hidden: attr(m[1], 'hidden') === '1' }));
+      const d = attr(/<sheetFormatPr\b([^>]*)/.exec(this.pre)?.[1] || '', 'defaultColWidth');
+      this.defCol = d ? Math.trunc(((256 * +d + 18) / 256) * 7) : 64;
+      this.defRow = +(attr(/<sheetFormatPr\b([^>]*)/.exec(this.pre)?.[1] || '', 'defaultRowHeight') || 15);
+    }
+    const col = this.cols.find((k) => c >= k.min && c <= k.max);
+    return col ? (col.hidden ? 0 : Math.trunc(((256 * col.w + 18) / 256) * 7) * 9525) : this.defCol * 9525;
+  }
+  rowEmu(r) { this.colEmu(0); const row = this.rows.get(r); if (row && attr(row.a, 'hidden') === '1') return 0; const ht = row && attr(row.a, 'ht'); return (ht ? +ht : this.defRow) * 12700; }
   text(r, c) {
     const k = this.cell(r, c); if (!k) return '';
     const t = attr(k.a, 't');
@@ -341,6 +363,149 @@ function parseRef(f) {
 const fmtRef = (sheet, c1, r1, c2, r2) => xesc(`'${sheet.replace(/'/g, "''")}'!$${colL(c1)}$${r1}` + (c1 !== c2 || r1 !== r2 ? `:$${colL(c2)}$${r2}` : ''));
 const chartTitle = (x) => unx([...(x.split('<c:plotArea>')[0]).matchAll(/<a:t>([^<]*)<\/a:t>/g)].map((m) => m[1]).join('')).trim();
 
+// ---------- formula evaluation (for chart caches) ----------
+// A small Excel formula evaluator: enough for the template's chart cells (OTD %, totals, cumulative Pareto %).
+// Supports numbers, strings, %, cell and range refs (also on other sheets), + - * / ^ & comparisons,
+// and SUM, AVERAGE, MIN, MAX, COUNT, IF, IFERROR, ISERROR, NA, ROUND, ABS.
+const isErr = (v) => v != null && typeof v === 'object' && 'err' in v;
+const ERRV = (e) => ({ err: e });
+const TOKEN = /\s*(?:("(?:[^"]|"")*")|((?:'(?:[^']|'')+'|[A-Za-z0-9_.]+)!\$?[A-Z]{1,3}\$?\d+(?::\$?[A-Z]{1,3}\$?\d+)?)|(\$?[A-Z]{1,3}\$?\d+(?::\$?[A-Z]{1,3}\$?\d+)?)(?![\w(!])|(\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|\.\d+)|([A-Za-z_][\w.]*)(?=\s*\()|(TRUE|FALSE)\b|(<>|<=|>=|[-+*/^&=<>(),%]))/y;
+function tokenize(f) {
+  const out = []; TOKEN.lastIndex = 0; let m;
+  while (TOKEN.lastIndex < f.length && (m = TOKEN.exec(f))) {
+    if (m[1] != null) out.push({ t: 'str', v: m[1].slice(1, -1).replace(/""/g, '"') });
+    else if (m[2] != null) out.push({ t: 'ref', v: m[2] });
+    else if (m[3] != null) out.push({ t: 'ref', v: m[3] });
+    else if (m[4] != null) out.push({ t: 'num', v: +m[4] });
+    else if (m[5] != null) out.push({ t: 'fn', v: m[5].toUpperCase().replace(/^_XLFN\./, '') });
+    else if (m[6] != null) out.push({ t: 'bool', v: m[6] === 'TRUE' });
+    else out.push({ t: 'op', v: m[7] });
+  }
+  if (TOKEN.lastIndex < f.trim().length && !/^\s*$/.test(f.slice(TOKEN.lastIndex))) throw new Error('unsupported formula');
+  return out;
+}
+function makeEval(sheets) {
+  const memo = new Map();
+  const cellVal = (sn, r, c) => {
+    const key = sn + '\u0000' + r + ',' + c; if (memo.has(key)) return memo.get(key);
+    memo.set(key, ERRV('#REF!'));   // guards against circular references
+    const sh = sheets.get(sn); let v = null;
+    if (sh) {
+      const f = sh.formula(r, c);
+      if (f != null) { try { v = evalFormula(f, sn); } catch (e) { v = ERRV('#VALUE!'); } }
+      else { const n = sh.num(r, c); v = n != null ? n : sh.text(r, c) || null; }
+    }
+    memo.set(key, v); return v;
+  };
+  const refOf = (txt, sn) => {
+    const i = txt.lastIndexOf('!'), sheet = i >= 0 ? txt.slice(0, i).replace(/^'|'$/g, '').replace(/''/g, "'") : sn;
+    const m = /\$?([A-Z]+)\$?(\d+)(?::\$?([A-Z]+)\$?(\d+))?$/.exec(txt.slice(i + 1));
+    return { sheet, c1: colIdx(m[1]), r1: +m[2], c2: colIdx(m[3] || m[1]), r2: +(m[4] || m[2]) };
+  };
+  const num = (v) => (isErr(v) ? v : v == null || v === '' ? 0 : typeof v === 'number' ? v : typeof v === 'boolean' ? +v : isFinite(+v) ? +v : ERRV('#VALUE!'));
+  const scalar = (v) => (v && v.range ? v.range[0] ?? null : v);
+  function evalFormula(f, sn) {
+    const tk = tokenize(f.replace(/^=/, '')); let p = 0;
+    const peek = () => tk[p], isOp = (o) => tk[p] && tk[p].t === 'op' && tk[p].v === o;
+    const take = () => tk[p++];
+    const expr = () => compare();
+    function compare() {
+      let a = concat();
+      while (tk[p] && tk[p].t === 'op' && ['=', '<>', '<', '>', '<=', '>='].includes(tk[p].v)) {
+        const o = take().v, b = concat(), x = scalar(a), y = scalar(b);
+        if (isErr(x)) { a = x; continue; } if (isErr(y)) { a = y; continue; }
+        const X = x == null ? (typeof y === 'string' ? '' : 0) : x, Y = y == null ? (typeof x === 'string' ? '' : 0) : y;
+        const cmp = typeof X === 'string' && typeof Y === 'string' ? X.toLowerCase().localeCompare(Y.toLowerCase()) : typeof X === typeof Y ? (X < Y ? -1 : X > Y ? 1 : 0) : typeof X === 'string' ? 1 : -1;
+        a = { '=': cmp === 0, '<>': cmp !== 0, '<': cmp < 0, '>': cmp > 0, '<=': cmp <= 0, '>=': cmp >= 0 }[o];
+      }
+      return a;
+    }
+    function concat() { let a = add(); while (isOp('&')) { take(); const b = add(), x = scalar(a), y = scalar(b); a = isErr(x) ? x : isErr(y) ? y : String(x ?? '') + String(y ?? ''); } return a; }
+    function add() { let a = mul(); while (isOp('+') || isOp('-')) { const o = take().v, x = num(scalar(a)), y = num(scalar(mul())); a = isErr(x) ? x : isErr(y) ? y : o === '+' ? x + y : x - y; } return a; }
+    function mul() {
+      let a = pow();
+      while (isOp('*') || isOp('/')) {
+        const o = take().v, x = num(scalar(a)), y = num(scalar(pow()));
+        a = isErr(x) ? x : isErr(y) ? y : o === '*' ? x * y : y === 0 ? ERRV('#DIV/0!') : x / y;
+      }
+      return a;
+    }
+    function pow() { let a = unary(); while (isOp('^')) { take(); const x = num(scalar(a)), y = num(scalar(unary())); a = isErr(x) ? x : isErr(y) ? y : Math.pow(x, y); } return a; }
+    function unary() { if (isOp('-')) { take(); const x = num(scalar(unary())); return isErr(x) ? x : -x; } if (isOp('+')) { take(); return unary(); } return postfix(); }
+    function postfix() { let a = primary(); while (isOp('%')) { take(); const x = num(scalar(a)); a = isErr(x) ? x : x / 100; } return a; }
+    function args() {
+      const out = []; take();   // (
+      if (isOp(')')) { take(); return out; }
+      for (;;) { out.push(isOp(',') || isOp(')') ? null : expr()); if (isOp(',')) { take(); continue; } if (isOp(')')) { take(); return out; } throw new Error('bad call'); }
+    }
+    const flat = (vals) => vals.flatMap((v) => (v && v.range ? v.range : [v]));
+    function call(name, a) {
+      switch (name) {
+        case 'IF': { const c = scalar(a[0]); if (isErr(c)) return c; const t = typeof c === 'string' ? c !== '' : !!num(c); return t ? (a.length > 1 ? scalar(a[1]) ?? 0 : true) : (a.length > 2 ? scalar(a[2]) ?? 0 : false); }
+        case 'IFERROR': { const v = scalar(a[0]); return isErr(v) ? scalar(a[1]) ?? 0 : v; }
+        case 'ISERROR': return isErr(scalar(a[0]));
+        case 'NA': return ERRV('#N/A');
+        case 'SUM': case 'AVERAGE': case 'MIN': case 'MAX': case 'COUNT': {
+          const vs = flat(a); const e = vs.find(isErr); if (e) return e;
+          const ns = vs.filter((v) => typeof v === 'number');
+          if (name === 'SUM') return ns.reduce((s, x) => s + x, 0);
+          if (name === 'COUNT') return ns.length;
+          if (!ns.length) return name === 'AVERAGE' ? ERRV('#DIV/0!') : 0;
+          return name === 'AVERAGE' ? ns.reduce((s, x) => s + x, 0) / ns.length : Math[name.toLowerCase()](...ns);
+        }
+        case 'ROUND': { const x = num(scalar(a[0])), d = num(scalar(a[1] ?? 0)); return isErr(x) ? x : Math.round(x * 10 ** d) / 10 ** d; }
+        case 'ABS': { const x = num(scalar(a[0])); return isErr(x) ? x : Math.abs(x); }
+        default: throw new Error('unsupported function ' + name);
+      }
+    }
+    function primary() {
+      const t = take(); if (!t) throw new Error('unexpected end');
+      if (t.t === 'num' || t.t === 'str' || t.t === 'bool') return t.v;
+      if (t.t === 'ref') {
+        const r = refOf(t.v, sn);
+        if (r.r1 === r.r2 && r.c1 === r.c2) return cellVal(r.sheet, r.r1, r.c1);
+        const range = []; for (let rr = r.r1; rr <= r.r2; rr++) for (let cc = r.c1; cc <= r.c2; cc++) range.push(cellVal(r.sheet, rr, cc));
+        return { range };
+      }
+      if (t.t === 'fn') return call(t.v, args());
+      if (t.t === 'op' && t.v === '(') { const v = expr(); if (!isOp(')')) throw new Error('missing )'); take(); return v; }
+      throw new Error('unexpected ' + t.v);
+    }
+    const v = expr(); return scalar(v);
+  }
+  return cellVal;
+}
+const fmtNum = (n) => (Number.isInteger(n) ? String(n) : String(+n.toPrecision(15)));
+// The number format of each cell style (xl/styles.xml), so chart caches carry "0.0%" or "#,##0" like Excel writes them.
+const BUILTIN_FMT = { 0: 'General', 1: '0', 2: '0.00', 3: '#,##0', 4: '#,##0.00', 9: '0%', 10: '0.00%', 11: '0.00E+00', 14: 'm/d/yyyy', 37: '#,##0 ;(#,##0)', 38: '#,##0 ;[Red](#,##0)' };
+function styleFormats(stylesXml) {
+  const custom = new Map();
+  for (const m of stylesXml.matchAll(/<numFmt\b([^>]*)\/?>/g)) custom.set(+attr(m[1], 'numFmtId'), unx(attr(m[1], 'formatCode') || 'General'));
+  const xfs = /<cellXfs\b[^>]*>([\s\S]*?)<\/cellXfs>/.exec(stylesXml)?.[1] || '';
+  const ids = [...xfs.matchAll(/<xf\b([^>]*?)\/?>/g)].map((m) => +(attr(m[1], 'numFmtId') || 0));
+  return (s) => { const id = ids[+s || 0] ?? 0; return custom.get(id) ?? BUILTIN_FMT[id] ?? 'General'; };
+}
+// Fill a chart's series caches (what PowerPoint and Excel draw before recalculating) from the cell values.
+function fillCaches(x, cellVal, fmtOf = () => null) {
+  return x.replace(/<c:(numRef|strRef)>\s*<c:f>([^<]*)<\/c:f>([\s\S]*?)<\/c:\1>/g, (all, kind, f, rest) => {
+    const r = parseRef(f); if (!r) return all;
+    const vals = [], at = []; for (let rr = r.r1; rr <= r.r2; rr++) for (let cc = r.c1; cc <= r.c2; cc++) { vals.push(cellVal(r.sheet, rr, cc)); at.push([rr, cc]); }
+    // format: the cells' own number format (first cell with a value), else what the old cache had
+    const k = Math.max(0, vals.findIndex((v) => typeof v === 'number'));
+    const old = /<c:formatCode>([\s\S]*?)<\/c:formatCode>/.exec(rest)?.[1];
+    const own = fmtOf(r.sheet, at[k][0], at[k][1]);
+    const fmt = own && own !== 'General' ? xesc(own) : old ?? 'General';
+    const pts = vals.map((v, i) => {
+      if (v == null || v === '' || isErr(v)) return '';
+      if (kind === 'numRef') { const n = typeof v === 'number' ? v : typeof v === 'boolean' ? +v : parseFloat(v); return isFinite(n) ? `<c:pt idx="${i}"><c:v>${fmtNum(n)}</c:v></c:pt>` : ''; }
+      return `<c:pt idx="${i}"><c:v>${xesc(typeof v === 'number' ? fmtNum(v) : typeof v === 'boolean' ? (v ? 'TRUE' : 'FALSE') : String(v))}</c:v></c:pt>`;
+    }).join('');
+    const cache = kind === 'numRef' ? `<c:numCache><c:formatCode>${fmt}</c:formatCode><c:ptCount val="${vals.length}"/>${pts}</c:numCache>` : `<c:strCache><c:ptCount val="${vals.length}"/>${pts}</c:strCache>`;
+    const ext = /<c:extLst>[\s\S]*<\/c:extLst>/.exec(rest)?.[0] || '';
+    return `<c:${kind}><c:f>${f}</c:f>${cache}${ext}</c:${kind}>`;
+  });
+}
+
 export async function isChartsTemplate(blob) {
   try {
     const z = await listZip(blob); if (!z.has('xl/workbook.xml')) return false;
@@ -367,11 +532,12 @@ export async function fillTemplate(blob, recs, sel, templateName = '') {
   // ship dates and only the current week has its delay causes filled, so recomputing older weeks would undercount them.
   const Q = quarterOf(sel.fy, sel.wk), tw = templateWeekOf(templateName);
   const newQuarter = !!tw && (tw.fy !== sel.fy || quarterOf(tw.fy, tw.wk).q !== Q.q) && (tw.fy < sel.fy || (tw.fy === sel.fy && tw.wk < sel.wk));
-  const warnings = [], tabs = [];
+  const warnings = [], tabs = [], sheetsMap = new Map(), chartJobs = [];
   for (const m of wbXml.matchAll(/<sheet\b([^>]*)\/?>/g)) {
     const name = unx(attr(m[1], 'name') || ''), path = wbRels.get(attr(m[1], 'r:id'));
     if (!path || !files.has(path)) continue;
     const sh = new Sheet(dec.decode(files.get(path)), sst), scope = tabScope(name), hawb = scope.hawb;
+    sheetsMap.set(name, sh);
     const tab = { name, blocks: [], paretos: [] };
     // --- OTD blocks: "Total Weekly (Units) Due" labels; left one is FTL, right one LTL
     const labels = sh.find(/^total weekly (units )?due$/i);
@@ -426,7 +592,17 @@ export async function fillTemplate(blob, recs, sel, templateName = '') {
     const sheetRels = relsOf(files, path);
     for (const dp of sheetRels.values()) {
       if (!/drawings\/drawing\d+\.xml$/.test(dp)) continue;
-      for (const cp of relsOf(files, dp).values()) {
+      // each chart's size on the sheet, from its two-cell anchor
+      const sizeOf = new Map(), dx = dec.decode(files.get(dp) || new Uint8Array());
+      for (const an of dx.matchAll(/<xdr:twoCellAnchor\b[^>]*>([\s\S]*?)<\/xdr:twoCellAnchor>/g)) {
+        const rid = /<c:chart\b[^>]*r:id="([^"]+)"/.exec(an[1])?.[1]; if (!rid) continue;
+        const pos = (tag) => { const t = new RegExp(`<xdr:${tag}>([\\s\\S]*?)</xdr:${tag}>`).exec(an[1])?.[1] || ''; const g = (k) => +(new RegExp(`<xdr:${k}>(-?\\d+)</xdr:${k}>`).exec(t)?.[1] || 0); return { c: g('col'), co: g('colOff'), r: g('row'), ro: g('rowOff') }; };
+        const f = pos('from'), t = pos('to'); let w = t.co - f.co, h = t.ro - f.ro;
+        for (let c = f.c; c < t.c; c++) w += sh.colEmu(c);
+        for (let r = f.r; r < t.r; r++) h += sh.rowEmu(r + 1);
+        if (w > 0 && h > 0) sizeOf.set(rid, { w, h });
+      }
+      for (const [crid, cp] of relsOf(files, dp)) {
         if (!/charts\/chart\d+\.xml$/.test(cp) || !files.has(cp)) continue;
         let x = dec.decode(files.get(cp)); const title = chartTitle(x);
         const refs = [...x.matchAll(/<c:f>([^<]*)<\/c:f>/g)].map((mm) => parseRef(mm[1])).filter((r) => r && r.sheet === name);
@@ -461,14 +637,21 @@ export async function fillTemplate(blob, recs, sel, templateName = '') {
             return `<c:f>${fmtRef(name, r.c1, r.r1, b.c + Q.qweek, r.r1)}</c:f>`;
           });
         }
-        if (changed) {
-          x = x.replace(/<c:(numCache|strCache)>[\s\S]*?<\/c:\1>/g, '');
-          files.set(cp, enc.encode(x));
-        }
+        if (changed) chartJobs.push({ cp, x, sheet: name, title, size: sizeOf.get(crid) || null });
       }
     }
     files.set(path, enc.encode(sh.toXml()));
     tabs.push(tab);
+  }
+  // chart caches from the updated cells, so the charts are right before Excel recalculates (and in PowerPoint)
+  const cellVal = makeEval(sheetsMap), charts = [];
+  const styleFmt = styleFormats(files.has('xl/styles.xml') ? dec.decode(files.get('xl/styles.xml')) : '');
+  const fmtOf = (sn, r, c) => { const k = sheetsMap.get(sn)?.cell(r, c); return k ? styleFmt(attr(k.a, 's')) : null; };
+  for (const j of chartJobs) {
+    let x = j.x;
+    try { x = fillCaches(x, cellVal, fmtOf); } catch (e) { x = x.replace(/<c:(numCache|strCache)>[\s\S]*?<\/c:\1>/g, ''); warnings.push(`${j.sheet}: chart "${j.title}" will update when the file is opened (${e.message})`); }
+    files.set(j.cp, enc.encode(x));
+    charts.push({ sheet: j.sheet, title: j.title, xml: x, path: j.cp, size: j.size });
   }
   // Excel rebuilds the calculation chain and recalculates every formula when the file opens
   if (files.has('xl/calcChain.xml')) {
@@ -497,7 +680,7 @@ export async function fillTemplate(blob, recs, sel, templateName = '') {
     // weeks after the selected one are not read back into the series, so look at the sheet values
     for (const b of main.blocks) for (const s of b.series) if (s.w > sel.wk && s.later) later.push(s.w);
   }
-  return { blob: await zip(files), tabs, warnings, quarter: Q, qtd, template: { week: tw, newQuarter, missing, later: [...new Set(later)].sort((a, b) => a - b) } };
+  return { blob: await zip(files), tabs, warnings, quarter: Q, qtd, charts, template: { week: tw, newQuarter, missing, later: [...new Set(later)].sort((a, b) => a - b) } };
 }
 
 export const outName = (sel) => `Apple Dom WK${sel.wk} Charts Template FY${String(sel.fy).slice(2)}.xlsx`;

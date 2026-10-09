@@ -3,7 +3,7 @@
 // the browser with model.js, writes the week's numbers into the template and builds the PowerPoint tables.
 // Nothing is uploaded; the template is kept in this browser's IndexedDB so later weeks only need the AMR file.
 import { esc } from '/assets/core/util.js';
-import { quarterOf, weekRange } from './model.js';
+import { quarterOf, weekRange, slide8Text } from './model.js';
 
 const $ = (s) => document.querySelector(s);
 const fmtN = (n) => (n == null ? '–' : Math.round(n).toLocaleString('en-US'));
@@ -23,16 +23,25 @@ async function idbSet(k, v) { try { const db = await idb(); await new Promise((o
 
 let TEMPLATE = null;   // { name, blob, saved }
 let AMR = null;        // { name, rows, weeks }
+let DECK = null;       // last week's PowerPoint { name, blob, saved }, kept in this browser
 let RES = null;        // last worker result
 let SHEET = null;      // template tab shown
 let S8 = 'no';         // slide 8 numbers: NO AC (as in FY27 FW1) or WITH AC (as in FY26 FW52)
 try { SHEET = localStorage.getItem(SHEET_KEY); S8 = localStorage.getItem(S8_KEY) || 'no'; } catch (e) {}
 
+const savedOn = (x) => (x.saved ? 'on ' + esc(new Date(x.saved).toLocaleDateString()) : '');
 function tplStatus() {
-  $('#tplAsk').hidden = !!TEMPLATE;
-  $('#tplStatus').innerHTML = TEMPLATE
-    ? `Charts Template: <b>${esc(TEMPLATE.name)}</b>, saved in this browser ${TEMPLATE.saved ? 'on ' + esc(new Date(TEMPLATE.saved).toLocaleDateString()) : ''}. <label class="ad-linkbtn" for="tplInput">Replace</label>`
-    : '';
+  $('#tplAsk').hidden = !!TEMPLATE; $('#deckAsk').hidden = !!DECK;
+  $('#tplStatus').innerHTML = [
+    TEMPLATE ? `Charts Template: <b>${esc(TEMPLATE.name)}</b>, saved in this browser ${savedOn(TEMPLATE)}. <label class="ad-linkbtn" for="tplInput">Replace</label>` : '',
+    DECK ? `PowerPoint: <b>${esc(DECK.name)}</b>, saved ${savedOn(DECK)}. <label class="ad-linkbtn" for="deckInput">Replace</label>` : '',
+  ].filter(Boolean).join('<br>');
+  pptState();
+}
+function pptState() {
+  const b = $('#pptBtn'); if (!b) return;
+  b.disabled = !(RES && RES.blob && DECK);
+  b.title = !DECK ? "Add last week's PowerPoint first (Replace deck)" : !(RES && RES.blob) ? 'Add the Charts Template first' : 'Build this week\'s deck from last week\'s';
 }
 
 // ---------- worker ----------
@@ -49,15 +58,19 @@ worker.onmessage = (e) => {
 function showError(where, msg) { const el = $(where); el.textContent = msg; el.hidden = !msg; }
 
 async function handleFiles(list) {
-  const files = [...list].filter((f) => /\.xlsx$/i.test(f.name));
+  const files = [...list].filter((f) => /\.(xlsx|pptx)$/i.test(f.name));
   showError('#startError', ''); showError('#appError', '');
-  if (!files.length) { showError(AMR ? '#appError' : '#startError', 'Choose .xlsx files: the APPLE_AMR export and, the first time, the Charts Template.'); return; }
+  if (!files.length) { showError(AMR ? '#appError' : '#startError', "Choose the APPLE_AMR .xlsx and, the first time, last week's Charts Template .xlsx and PowerPoint .pptx."); return; }
   let kinds;
   try { kinds = (await ask({ type: 'classify', files })).kinds; } catch (e) { showError(AMR ? '#appError' : '#startError', e.message); return; }
   const tpl = files.find((f, i) => kinds[i] === 'template'), amrs = files.filter((f, i) => kinds[i] === 'amr');
   if (tpl) { TEMPLATE = { name: tpl.name, blob: tpl, saved: Date.now() }; await idbSet('template', { name: tpl.name, blob: tpl, saved: TEMPLATE.saved }); tplStatus(); }
+  const deck = files.find((f, i) => kinds[i] === 'deck');
+  if (deck) { DECK = { name: deck.name, blob: deck, saved: Date.now() }; await idbSet('deck', DECK); tplStatus(); }
+  if (files.some((f, i) => kinds[i] === 'other')) showError(AMR ? '#appError' : '#startError', 'A .pptx file could not be read as a PowerPoint deck.');
   if (amrs.length) await loadAmr(amrs[0], amrs.length > 1 ? `${amrs.length} APPLE_AMR files were chosen; using ${amrs[0].name}.` : '');
   else if (AMR && tpl) await run();
+  else if (deck) pptState();
 }
 
 async function loadAmr(file, note) {
@@ -85,7 +98,7 @@ async function run(note = '') {
   $('#headEyebrow').textContent = `Apple domestic OTP · FY${String(sel.fy).slice(2)} Q${q.q}`;
   $('#headTitle').textContent = `Week ${sel.wk}`;
   const [a, b] = weekRange(sel.fy, sel.wk); $('#weekDates').textContent = `Due ${fmtD(a)} – ${fmtD(b)}, quarter week ${q.qweek}`;
-  $('#dlBtn').disabled = true;
+  $('#dlBtn').disabled = true; $('#pptBtn').disabled = true;
   try {
     RES = await ask({ type: 'run', sel, template: TEMPLATE ? TEMPLATE.blob : null, templateName: TEMPLATE ? TEMPLATE.name : '' });
   } catch (e) { showError('#appError', e.message); return; }
@@ -96,7 +109,7 @@ async function run(note = '') {
 // ---------- rendering ----------
 function render(note) {
   const R = RES, p = R.ppt;
-  $('#dlBtn').disabled = !R.blob;
+  $('#dlBtn').disabled = !R.blob; pptState();
   $('#dlBtn').textContent = R.blob ? `Download ${R.fileName}` : 'Download filled template';
   const notes = [];
   if (note) notes.push(note);
@@ -255,8 +268,7 @@ function renderPpt() {
     [{ label: 'Copy', text: () => tsv(p.s5.map((r) => [r.label, r.lane, r.hawb, Math.round(r.units)])) }]);
   // Slide 8
   const s8 = p.s8[S8 === 'with' ? 'withAC' : 'noAC'], top = s8.brands.slice(0, 5);
-  const sentence = s8.bkTotal ? `For BK & HB customer appointment issue, ${top.map((b) => `${(100 * b.units / s8.bkTotal).toFixed(1)}% by ${b.brand}`).join('; ')}` : 'No BK or HB delays this week.';
-  const lines = s8.pareto.items.filter(([c]) => !/^(BK|HB)\b/i.test(c)).map(([c, v]) => `${Math.round(v)} ${c.replace(/^[^-]*-\s*/, '').replace(/\s*\(.*$/, '')}`);
+  const [sentence, ...lines] = slide8Text(s8);
   $('#s8').innerHTML = `<div class="card-h"><h2>Slide 8 · LTL delay comments</h2><span class="sub">LTL, week ${sel.wk}</span><span class="ad-copies"><span class="chips">${[['no', 'NO AC'], ['with', 'WITH AC']].map(([k, l]) => `<button class="chip" type="button" data-s8="${k}" aria-pressed="${S8 === k}">${l}</button>`).join('')}</span><button class="ad-btn" type="button" id="copy8">Copy</button></span></div>
     <p class="ad-quote">${esc(sentence)}</p>
     <ul class="ad-lines">${lines.map((l) => `<li class="num">${esc(l)}</li>`).join('')}</ul>
@@ -274,6 +286,26 @@ $('#tplInput').addEventListener('change', async (e) => {
   if (kind !== 'template') { showError(AMR ? '#appError' : '#startError', `${f.name} is not the Apple Dom Charts Template (it has no "Overall" tabs).`); return; }
   TEMPLATE = { name: f.name, blob: f, saved: Date.now() }; await idbSet('template', TEMPLATE); tplStatus();
   if (AMR) run();
+});
+$('#deckInput').addEventListener('change', async (e) => {
+  const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+  let kind; try { kind = (await ask({ type: 'classify', files: [f] })).kinds[0]; } catch (err) { kind = null; }
+  if (kind !== 'deck') { showError(AMR ? '#appError' : '#startError', `${f.name} is not a PowerPoint deck.`); return; }
+  DECK = { name: f.name, blob: f, saved: Date.now() }; await idbSet('deck', DECK); tplStatus();
+});
+$('#pptBtn').addEventListener('click', async () => {
+  if (!RES || !RES.blob || !DECK) return;
+  const b = $('#pptBtn'), label = b.textContent; b.disabled = true; b.textContent = 'Building PowerPoint…';
+  try {
+    const out = await ask({ type: 'deck', deck: DECK.blob, sel: RES.sel, s8: S8 });
+    const a = document.createElement('a'), url = URL.createObjectURL(out.blob);
+    a.href = url; a.download = out.fileName; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    // this week's deck becomes next week's starting point
+    DECK = { name: out.fileName, blob: out.blob, saved: Date.now() }; idbSet('deck', DECK); tplStatus();
+    const n = $('#dlNote'); n.textContent = `Saved ${out.fileName} in this browser as next week's starting deck.` + (out.warnings.length ? ' ' + out.warnings.join(' ') : ''); n.hidden = false;
+  } catch (err) { showError('#appError', 'PowerPoint: ' + err.message); }
+  b.textContent = label; pptState();
 });
 $('#weekSel').addEventListener('change', () => run());
 $('#dlBtn').addEventListener('click', () => {
@@ -303,4 +335,4 @@ addEventListener('dragover', (e) => e.preventDefault());
 addEventListener('drop', (e) => { e.preventDefault(); depth = 0; document.body.classList.remove('dragging'); if (e.dataTransfer?.files?.length) handleFiles(e.dataTransfer.files); });
 let rt; addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => { if (RES && !$('#panel-charts').hidden) renderSheets(); }, 150); });
 
-(async () => { const t = await idbGet('template'); if (t && t.blob) TEMPLATE = t; tplStatus(); })();
+(async () => { const t = await idbGet('template'), d = await idbGet('deck'); if (t && t.blob) TEMPLATE = t; if (d && d.blob) DECK = d; tplStatus(); })();
