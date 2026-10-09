@@ -87,7 +87,7 @@ async function run(note = '') {
   const [a, b] = weekRange(sel.fy, sel.wk); $('#weekDates').textContent = `Due ${fmtD(a)} – ${fmtD(b)}, quarter week ${q.qweek}`;
   $('#dlBtn').disabled = true;
   try {
-    RES = await ask({ type: 'run', sel, template: TEMPLATE ? TEMPLATE.blob : null });
+    RES = await ask({ type: 'run', sel, template: TEMPLATE ? TEMPLATE.blob : null, templateName: TEMPLATE ? TEMPLATE.name : '' });
   } catch (e) { showError('#appError', e.message); return; }
   showError('#appError', '');
   render(note);
@@ -102,8 +102,13 @@ function render(note) {
   if (note) notes.push(note);
   if (!R.blob) notes.push('<b>Add the Charts Template</b> to fill and preview the charts: <label class="ad-linkbtn" for="tplInput">choose the Apple Dom Charts Template .xlsx</label>. It is kept in this browser for next time.');
   else {
-    const q = R.quarter;
-    notes.push(`Writes <b>W${R.sel.wk - q.first + 1}</b> (FW${R.sel.wk}) only. Earlier weeks of the quarter keep what was reported in the template, because the export covers only about a month of ship dates and only the current week has its delay causes. Use last week's filled file as the template; downloading saves it for next week automatically.`);
+    const q = R.quarter, t = R.template || {}, qw = (w) => 'W' + (w - q.first + 1), tn = esc(TEMPLATE ? TEMPLATE.name : 'the template');
+    const yy = (fy) => String(fy).slice(2);
+    if (t.newQuarter) notes.push(`<b>New quarter.</b> ${tn} holds FW${t.week.wk} FY${yy(t.week.fy)} (Q${quarterOf(t.week.fy, t.week.wk).q}), so its weekly numbers were cleared and Q${q.q} FY${yy(R.sel.fy)} starts with <b>${qw(R.sel.wk)}</b> (FW${R.sel.wk}).`);
+    else notes.push(`<b>Adds ${qw(R.sel.wk)}</b> (FW${R.sel.wk}) to ${tn}${t.week ? ` (FW${t.week.wk})` : ''}. Weeks already in the template are kept as reported; the APPLE_AMR export only covers about a month and only the current week has delay causes, so earlier weeks are not recomputed.`);
+    if (t.missing && t.missing.length) notes.push(`<b class="warn">${t.missing.map(qw).join(', ')} ${t.missing.length > 1 ? 'are' : 'is'} empty in this template.</b> Add ${t.missing.length > 1 ? 'those weeks' : 'that week'} first (that week's APPLE_AMR file with the earlier template), or the quarter will have a gap.`);
+    if (t.later && t.later.length) notes.push(`This template already has ${t.later.map(qw).join(', ')}, later than FW${R.sel.wk}; ${t.later.length > 1 ? 'they were' : 'it was'} kept.`);
+    notes.push('Downloading saves the filled file in this browser as next week\'s template, so next week you only drop the new APPLE_AMR file.');
     notes.push('Late units with no delay code are left out of the Paretos, like the pivots. OEM tabs (one Pareto) count FTL and LTL together.');
   }
   for (const w of R.warnings || []) notes.push(esc(w));

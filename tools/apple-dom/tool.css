@@ -57,6 +57,7 @@ body.dragging .ad-drop{border-color:var(--accent);color:var(--text);background:v
 .ad-notes{display:grid;gap:4px}
 .ad-notes p{margin:0;font-size:13px;color:var(--muted)}
 .ad-notes b{color:var(--a-ink2);font-weight:600}
+.ad-notes b.warn{color:var(--warn)}
 .g-ok{color:var(--good)} .g-warn{color:var(--warn)} .g-bad{color:var(--crit)}
 
 /* headline figures */

@@ -21,10 +21,10 @@ self.onmessage = async (e) => {
     } else if (m.type === 'run') {
       if (!AMR) throw new Error('Load the APPLE_AMR file first.');
       let res;
-      if (m.template) res = await fillTemplate(m.template, AMR.recs, m.sel);
+      if (m.template) res = await fillTemplate(m.template, AMR.recs, m.sel, m.templateName || m.template.name || '');
       else res = { blob: null, tabs: [], warnings: [], quarter: quarterOf(m.sel.fy, m.sel.wk), qtd: null };   // no Charts Template yet: PPT tables only
       const ppt = pptTables(AMR.recs, m.sel, res.qtd);
-      self.postMessage({ type: 'result', sel: m.sel, blob: res.blob, fileName: res.blob ? outName(m.sel) : null, tabs: res.tabs, warnings: res.warnings, quarter: res.quarter, ppt });
+      self.postMessage({ type: 'result', sel: m.sel, blob: res.blob, fileName: res.blob ? outName(m.sel) : null, tabs: res.tabs, warnings: res.warnings, quarter: res.quarter, template: res.template || null, ppt });
     }
   } catch (err) {
     self.postMessage({ type: 'error', step: m.type, message: err && err.message ? err.message : String(err) });

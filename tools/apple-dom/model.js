@@ -350,14 +350,23 @@ export async function isChartsTemplate(blob) {
 
 // Fill the template for the selected week. Returns { blob, tabs, warnings }.
 // tabs: per sheet, the OTD blocks (13-week series after the update) and Paretos, for the page preview.
-export async function fillTemplate(blob, recs, sel) {
+// The fiscal week a Charts Template file holds, from its name: "Apple Dom WK1 Charts Template FY27.xlsx" -> { wk: 1, fy: 2027 }
+export function templateWeekOf(name) {
+  const m = /WK\s*(\d{1,2})\b[\s\S]*?FY\s*'?(\d{2})\b/i.exec(name || '');
+  return m && +m[1] >= 1 && +m[1] <= 53 ? { wk: +m[1], fy: 2000 + +m[2] } : null;
+}
+
+// Adds the selected week to the template (last week's filled file). Earlier weeks of the quarter are kept as reported.
+// A template from an earlier quarter starts the new quarter: its old weekly numbers are cleared.
+export async function fillTemplate(blob, recs, sel, templateName = '') {
   const files = await unzip(blob);
   const wbPath = 'xl/workbook.xml', wbXml = dec.decode(files.get(wbPath)), wbRels = relsOf(files, wbPath);
   const sstXml = files.has('xl/sharedStrings.xml') ? dec.decode(files.get('xl/sharedStrings.xml')) : '';
   const sst = [...sstXml.matchAll(/<si>([\s\S]*?)<\/si>/g)].map((m) => unx([...m[1].replace(/<rPh\b[\s\S]*?<\/rPh>/g, '').matchAll(/<t\b[^>]*>([\s\S]*?)<\/t>/g)].map((t) => t[1]).join('')));
   // Only the selected week is written. Earlier weeks keep what was reported: the export covers about a month of
   // ship dates and only the current week has its delay causes filled, so recomputing older weeks would undercount them.
-  const Q = quarterOf(sel.fy, sel.wk);
+  const Q = quarterOf(sel.fy, sel.wk), tw = templateWeekOf(templateName);
+  const newQuarter = !!tw && (tw.fy !== sel.fy || quarterOf(tw.fy, tw.wk).q !== Q.q) && (tw.fy < sel.fy || (tw.fy === sel.fy && tw.wk < sel.wk));
   const warnings = [], tabs = [];
   for (const m of wbXml.matchAll(/<sheet\b([^>]*)\/?>/g)) {
     const name = unx(attr(m[1], 'name') || ''), path = wbRels.get(attr(m[1], 'r:id'));
@@ -389,9 +398,15 @@ export async function fillTemplate(blob, recs, sel) {
           if (b.unadj) { if (!o.due) sh.setNum(b.unadj, c, 1, c0); else if (sh.formula(b.unadj, c) == null) sh.setFormula(b.unadj, c, `IFERROR(IF(${C}${b.r}=0,NA(),(1-(${C}${b.r + 1}/${C}${b.r}))),0)`, c0); }
           if (b.adj) { if (!o.due) sh.setNum(b.adj, c, 1, c0); else if (sh.formula(b.adj, c) == null) sh.setFormula(b.adj, c, `IFERROR(IF(${C}${b.r + 2}="",100%,IF(${C}${b.r}=0,NA(),(1-(${C}${b.r + 2}/${C}${b.r})))),0)`, c0); }
           series.push({ w, ...o, fromFile: true, was });
+        } else if (newQuarter) {
+          // last quarter's numbers: clear them and put the OTD % formulas back (old reports typed 1 into empty weeks)
+          for (let k = 0; k < 3; k++) sh.clear(b.r + k, c);
+          if (b.unadj) sh.setFormula(b.unadj, c, `IFERROR(IF(${C}${b.r}=0,NA(),(1-(${C}${b.r + 1}/${C}${b.r}))),0)`, c0);
+          if (b.adj) sh.setFormula(b.adj, c, `IFERROR(IF(${C}${b.r + 2}="",100%,IF(${C}${b.r}=0,NA(),(1-(${C}${b.r + 2}/${C}${b.r})))),0)`, c0);
+          series.push({ w, due: null });
         } else {
           const due = sh.num(b.r, c), late = sh.num(b.r + 1, c), carrier = sh.num(b.r + 2, c);
-          series.push(w <= sel.wk && due != null ? { w, due, late: late || 0, carrier: carrier || 0, fromFile: false } : { w, due: null });
+          series.push(w <= sel.wk && due != null ? { w, due, late: late || 0, carrier: carrier || 0, fromFile: false } : { w, due: null, later: w > sel.wk && !!due });
         }
       }
       tab.blocks.push({ tl: b.tl, series, label: hawb ? 'HAWBs' : 'Units' });
@@ -473,7 +488,16 @@ export async function fillTemplate(blob, recs, sel) {
     return o;
   };
   const qtd = { units: qsum('OVERALL(WITHAC)'), unitsNoAC: qsum('OVERALL(NOAC)'), hawb: qsum('OVERALLHAWB(WITHAC)', 'LTL'), hawbAll: qsum('OVERALLHAWB(WITHAC)') };
-  return { blob: await zip(files), tabs, warnings, quarter: Q, qtd };
+  // which quarter weeks the result holds: earlier weeks still empty (a skipped week) and later weeks already filled
+  const main = tabs.find((t) => /^overall\s*\(with/i.test(t.name)) || tabs.find((t) => t.blocks.length);
+  const held = (w) => main && main.blocks.some((b) => b.series.find((s) => s.w === w)?.due != null);
+  const missing = [], later = [];
+  if (main && !newQuarter) {
+    for (let w = Q.first; w < sel.wk; w++) if (!held(w)) missing.push(w);
+    // weeks after the selected one are not read back into the series, so look at the sheet values
+    for (const b of main.blocks) for (const s of b.series) if (s.w > sel.wk && s.later) later.push(s.w);
+  }
+  return { blob: await zip(files), tabs, warnings, quarter: Q, qtd, template: { week: tw, newQuarter, missing, later: [...new Set(later)].sort((a, b) => a - b) } };
 }
 
 export const outName = (sel) => `Apple Dom WK${sel.wk} Charts Template FY${String(sel.fy).slice(2)}.xlsx`;
