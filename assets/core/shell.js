@@ -10,7 +10,7 @@ const THEME_ICONS =
 const nav = document.querySelector('[data-shell="nav"]');
 if (nav){
   nav.innerHTML = '<nav class="nav-inner" aria-label="Site">' +
-    '<a class="brand" href="/">' + esc(SITE.name) + '</a>' +
+    '<a class="brand" href="/">Home</a>' +
     '<div class="nav-links"><a href="/#tools">Tools</a><a href="' + esc(SITE.github) + '">GitHub</a>' +
       '<button type="button" class="theme-btn" aria-label="Switch light or dark mode" title="Light / dark mode">' + THEME_ICONS + '</button></div>' +
   '</nav>';

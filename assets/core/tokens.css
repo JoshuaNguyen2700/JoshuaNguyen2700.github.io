@@ -1,27 +1,28 @@
 /* Design tokens: the raw materials every page draws from.
    Add new tokens freely. Don't rename or remove existing ones; pages may depend on them.
-   Dark values apply when the system is dark (unless the visitor picked light) or when they picked dark. */
+   Dark values apply when the system is dark (unless the visitor picked light) or when they picked dark.
+   The look is minimal: near-monochrome, one quiet link color, hairline lines, small radii. */
 :root{
-  --font:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text","Segoe UI Variable Display","Segoe UI",system-ui,"Helvetica Neue",Arial,sans-serif;
-  --bg:#ffffff; --text:#1d1d1f; --muted:#6e6e73; --tile:#f5f5f7; --tile-hover:#ececf0;
-  --line:rgba(0,0,0,.08); --nav-bg:rgba(255,255,255,.72); --link:#0066cc;
-  --accent:#0071e3; --accent-text:#ffffff; --live:#1d8a3a;
-  --max-width:1024px; --gutter:22px; --nav-height:48px;
-  --radius-tile:28px; --radius-pill:980px;
+  --font:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI Variable Text","Segoe UI",system-ui,"Helvetica Neue",Arial,sans-serif;
+  --bg:#ffffff; --text:#111111; --muted:#6b6b6b; --tile:#f6f6f6; --tile-hover:#efefef;
+  --line:rgba(0,0,0,.08); --line-strong:rgba(0,0,0,.18); --nav-bg:rgba(255,255,255,.92); --link:#1a56c4;
+  --accent:#111111; --accent-text:#ffffff; --live:#2f7d45;
+  --max-width:1024px; --column:640px; --gutter:24px; --nav-height:56px;
+  --radius-tile:12px; --radius-pill:8px;
   color-scheme:light;
 }
 @media (prefers-color-scheme:dark){
   :root:not([data-theme="light"]){
-    --bg:#000000; --text:#f5f5f7; --muted:#a1a1a6; --tile:#1c1c1e; --tile-hover:#252528;
-    --line:rgba(255,255,255,.12); --nav-bg:rgba(22,22,23,.72); --link:#2997ff;
-    --live:#30d158;
+    --bg:#0a0a0a; --text:#ededed; --muted:#8f8f8f; --tile:#151515; --tile-hover:#1c1c1c;
+    --line:rgba(255,255,255,.09); --line-strong:rgba(255,255,255,.2); --nav-bg:rgba(10,10,10,.92); --link:#7aa7ff;
+    --accent:#ededed; --accent-text:#0a0a0a; --live:#5cc47c;
     color-scheme:dark;
   }
 }
 :root[data-theme="dark"]{
-  --bg:#000000; --text:#f5f5f7; --muted:#a1a1a6; --tile:#1c1c1e; --tile-hover:#252528;
-  --line:rgba(255,255,255,.12); --nav-bg:rgba(22,22,23,.72); --link:#2997ff;
-  --live:#30d158;
+  --bg:#0a0a0a; --text:#ededed; --muted:#8f8f8f; --tile:#151515; --tile-hover:#1c1c1c;
+  --line:rgba(255,255,255,.09); --line-strong:rgba(255,255,255,.2); --nav-bg:rgba(10,10,10,.92); --link:#7aa7ff;
+  --accent:#ededed; --accent-text:#0a0a0a; --live:#5cc47c;
   color-scheme:dark;
 }
 @media (max-width:640px){

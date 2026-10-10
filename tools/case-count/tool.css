@@ -3,18 +3,18 @@
    Colors build on the bus tokens (--bg, --text, --muted, --tile, --line, --accent); the extra
    chart tokens below are local to this tool. */
 :root{
-  --o-card:var(--tile); --o-raised:var(--bg); --o-ink2:#424245; --o-axis:#c7c7cc; --o-grid:#e3e3e8;
-  --o-hover:rgba(0,113,227,.08);
+  --o-card:var(--tile); --o-raised:var(--bg); --o-ink2:#3d3d3d; --o-axis:#d4d4d4; --o-grid:#ececec;
+  --o-hover:rgba(0,0,0,.035);
   --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --crit:#c9302c; --crit-rgb:215 0 21; --good:#1d8a3a;
 }
 @media (prefers-color-scheme:dark){
   :root:not([data-theme="light"]){
-    --o-ink2:#d2d2d7; --o-axis:#48484a; --o-grid:#2c2c2e; --o-hover:rgba(10,132,255,.16);
+    --o-ink2:#cfcfcf; --o-axis:#3a3a3a; --o-grid:#232323; --o-hover:rgba(255,255,255,.05);
     --s1:#3987e5; --s2:#d95926; --s3:#199e70; --crit:#ff6961; --crit-rgb:255 69 58; --good:#30d158;
   }
 }
 :root[data-theme="dark"]{
-  --o-ink2:#d2d2d7; --o-axis:#48484a; --o-grid:#2c2c2e; --o-hover:rgba(10,132,255,.16);
+  --o-ink2:#cfcfcf; --o-axis:#3a3a3a; --o-grid:#232323; --o-hover:rgba(255,255,255,.05);
   --s1:#3987e5; --s2:#d95926; --s3:#199e70; --crit:#ff6961; --crit-rgb:255 69 58; --good:#30d158;
 }
 
@@ -25,7 +25,7 @@
 /* ---- start screen ---- */
 .cc-start code{font-size:.85em;background:var(--tile);padding:1px 6px;border-radius:6px}
 .cc-start label.btn{cursor:pointer}
-.cc-drop{margin:28px auto 0;max-width:520px;border:2px dashed var(--o-axis);border-radius:18px;padding:22px;color:var(--muted);font-size:15px}
+.cc-drop{margin:28px auto 0;max-width:520px;border:1px dashed var(--o-axis);border-radius:10px;padding:22px;color:var(--muted);font-size:15px}
 .cc-drop.over,body.dragging .cc-drop{border-color:var(--accent);color:var(--text);background:var(--o-hover)}
 .cc-privacy{font-size:14px !important;margin-top:14px !important}
 .cc-error{color:var(--crit) !important;font-size:15px !important}
@@ -35,7 +35,7 @@
 
 /* ---- progress while reading Excel files ---- */
 .cc-progress{max-width:640px;margin:0 auto;padding:72px var(--gutter) 64px;display:grid;gap:12px}
-.cc-progress h2{margin:0;font-size:28px;font-weight:700;letter-spacing:-.02em}
+.cc-progress h2{margin:0;font-size:28px;font-weight:600;letter-spacing:-.02em}
 .cc-progress ul{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:14px}
 .cc-progress li{display:grid;gap:5px;font-size:15px}
 .cc-progress .pf{display:flex;justify-content:space-between;gap:12px;min-width:0}
@@ -55,15 +55,15 @@
 
 /* ---- app frame (wider than the bus max-width; this is a data tool) ---- */
 .cc{max-width:1320px;margin:0 auto;padding:24px var(--gutter) 64px;display:grid;gap:18px;font-size:14px;letter-spacing:-.005em;line-height:1.45}
-.cc h1{margin:0;font-size:clamp(28px,4vw,40px);line-height:1.1;font-weight:700;letter-spacing:-.025em}
+.cc h1{margin:0;font-size:clamp(28px,4vw,40px);line-height:1.1;font-weight:600;letter-spacing:-.02em}
 .cc h2{margin:0;font-size:17px;font-weight:600;letter-spacing:-.015em}
 .cc .eyebrow{margin-bottom:4px}
 .cc-week{display:inline-flex;align-items:center;gap:8px;margin-top:8px;font-size:14px;color:var(--o-ink2)}
-.cc-week b{display:inline-block;padding:2px 10px;border-radius:999px;border:1px solid var(--o-axis);background:var(--o-raised);color:var(--text);font-weight:600;font-size:13px}
+.cc-week b{display:inline-block;padding:2px 10px;border-radius:6px;border:1px solid var(--o-axis);background:var(--o-raised);color:var(--text);font-weight:600;font-size:13px}
 .cc th.now{color:var(--text);box-shadow:inset 0 -2px 0 var(--text)}
 .cc th.part{color:var(--muted);font-weight:500}
 .cc tr.now td:first-child{font-weight:600}
-.cc .nowtag,.cc .parttag{margin-left:6px;font-size:11px;font-weight:600;color:var(--o-ink2);border:1px solid var(--o-axis);border-radius:999px;padding:0 6px}
+.cc .nowtag,.cc .parttag{margin-left:6px;font-size:11px;font-weight:600;color:var(--o-ink2);border:1px solid var(--o-axis);border-radius:6px;padding:0 6px}
 .cc .parttag{font-weight:500;color:var(--muted)}
 .cc-head{display:flex;flex-wrap:wrap;align-items:end;justify-content:space-between;gap:10px 24px}
 .cc-meta{color:var(--muted);font-size:13px;text-align:right;display:grid;gap:4px}
@@ -82,9 +82,9 @@
 :where(.cc) :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
 /* filters: full panel in the page; a one-line summary bar takes over once it scrolls away */
-.cc-filters{background:var(--o-card);border:1px solid var(--line);border-radius:18px;padding:12px 16px;display:grid;gap:10px}
+.cc-filters{background:transparent;border:1px solid var(--line);border-radius:10px;padding:12px 16px;display:grid;gap:10px}
 .cc-mini{position:fixed;top:var(--nav-height);left:0;right:0;z-index:9;background:var(--nav-bg);border-bottom:1px solid var(--line);
-  backdrop-filter:saturate(180%) blur(20px);-webkit-backdrop-filter:saturate(180%) blur(20px)}
+  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
 .cc-mini-in{max-width:1320px;margin:0 auto;padding:7px var(--gutter);display:flex;gap:10px;align-items:center;font-size:13px;color:var(--o-ink2);min-width:0}
 .cc-mini-in .eyebrow{margin:0}
 .cc-mini-in #miniSummary{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
@@ -108,20 +108,20 @@
 
 /* headline figures */
 .tiles-k{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}
-.ktile{background:var(--o-card);border:1px solid var(--line);border-radius:18px;padding:14px 16px;display:grid;gap:4px;align-content:start}
+.ktile{background:transparent;border:1px solid var(--line);border-radius:10px;padding:14px 16px;display:grid;gap:4px;align-content:start}
 .ktile .eyebrow{margin:0}
-.ktile .v{font-size:28px;font-weight:700;letter-spacing:-.025em;line-height:1.1}
+.ktile .v{font-size:28px;font-weight:600;letter-spacing:-.02em;line-height:1.1}
 .ktile .d{font-size:13px;color:var(--muted)}
-.ktile.proj{background:transparent;border:1.5px dashed var(--o-axis)}
+.ktile.proj{background:transparent;border:1px dashed var(--o-axis)}
 .ktile.proj .v{color:var(--o-ink2)}
-.fc-note{margin:0;padding:10px 14px;border-radius:12px;background:var(--o-raised);border:1px solid var(--line);font-size:14px;color:var(--text)}
-.pill{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:1px 9px;border-radius:999px;width:fit-content}
+.fc-note{margin:0;padding:10px 14px;border-radius:8px;background:var(--o-raised);border:1px solid var(--line);font-size:14px;color:var(--text)}
+.pill{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:1px 9px;border-radius:6px;width:fit-content}
 .pill.bad{background:rgb(var(--crit-rgb) / .12);color:var(--crit)}
 .pill.ok{background:color-mix(in srgb,var(--good) 14%,transparent);color:var(--good)}
 
 /* cards */
 .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,520px),1fr));gap:18px}
-.card{background:var(--o-card);border:1px solid var(--line);border-radius:18px;padding:16px 18px;display:grid;gap:10px;min-width:0;align-content:start}
+.card{background:transparent;border:1px solid var(--line);border-radius:10px;padding:16px 18px;display:grid;gap:10px;min-width:0;align-content:start}
 .card-h{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:6px 14px}
 .legend{display:flex;flex-wrap:wrap;gap:12px;font-size:13px;color:var(--o-ink2)}
 .legend i{display:inline-block;width:14px;height:3px;border-radius:2px;vertical-align:middle;margin-right:6px}
@@ -135,7 +135,7 @@
 .chart text{font-family:var(--font);letter-spacing:0}
 
 /* tables */
-.tscroll{overflow:auto;max-height:560px;border:1px solid var(--line);border-radius:12px;background:var(--o-raised)}
+.tscroll{overflow:auto;max-height:560px;border:1px solid var(--line);border-radius:8px;background:var(--o-raised)}
 .cc table{border-collapse:separate;border-spacing:0;width:100%;font-size:13px;font-variant-numeric:tabular-nums;letter-spacing:0}
 .cc th,.cc td{padding:5px 9px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--line)}
 .cc th{position:sticky;top:0;background:var(--o-card);color:var(--o-ink2);font-weight:600;font-size:12px;z-index:2}
@@ -145,7 +145,7 @@
 .cc th:first-child,.cc td:first-child{text-align:left;position:sticky;left:0;background-color:var(--o-raised);z-index:1}
 .cc th:first-child{z-index:3;background-color:var(--o-card)}
 .cc td:first-child{max-width:260px;overflow:hidden;text-overflow:ellipsis}
-.cc tr.total td{font-weight:700;background-color:var(--o-card);position:sticky;bottom:0;z-index:2}
+.cc tr.total td{font-weight:600;background-color:var(--o-card);position:sticky;bottom:0;z-index:2}
 .cc tr.total td:first-child{z-index:3}
 .cc tbody tr:hover td{box-shadow:inset 0 0 0 100vmax var(--o-hover)}
 .cc td.thin{color:var(--muted)}
@@ -167,7 +167,7 @@
 .empty-s{padding:28px;text-align:center;color:var(--muted)}
 
 #tip{position:fixed;pointer-events:none;z-index:20;background:var(--o-raised);color:var(--text);border:1px solid var(--o-axis);border-radius:10px;padding:8px 10px;
-  font-size:13px;letter-spacing:0;box-shadow:0 8px 28px rgba(0,0,0,.16);min-width:160px;max-width:300px}
+  font-size:13px;letter-spacing:0;box-shadow:0 4px 16px rgba(0,0,0,.08);min-width:160px;max-width:300px}
 #tip .tt{font-weight:600;margin-bottom:4px}
 #tip .r{display:flex;justify-content:space-between;gap:14px;font-variant-numeric:tabular-nums}
 #tip .r span:first-child{color:var(--o-ink2);display:inline-flex;align-items:center;gap:6px}
@@ -196,7 +196,7 @@
 .cc td.wk,.cc th.wk{background-color:var(--o-card);font-weight:600}
 .cc th.wk{color:var(--text)}
 .cc tr.sub td{font-weight:600;background-color:var(--o-card);border-bottom-color:var(--o-axis)}
-.cc tr.grp td{font-weight:700;background-color:var(--o-raised);color:var(--text);padding-top:12px;text-transform:uppercase;font-size:11px;letter-spacing:.06em}
+.cc tr.grp td{font-weight:600;background-color:var(--o-raised);color:var(--text);padding-top:12px;text-transform:uppercase;font-size:11px;letter-spacing:.06em}
 .cc td.low{color:var(--crit);font-weight:600}
 .cc td.ok{color:var(--good)}
 .cc td.muted,.cc tr.muted td{color:var(--muted)}
@@ -225,8 +225,8 @@
 .ms-btn::after{content:"";position:absolute;right:10px;top:50%;width:6px;height:6px;border-right:1.5px solid var(--muted);border-bottom:1.5px solid var(--muted);transform:translateY(-70%) rotate(45deg)}
 .ms-btn:hover{border-color:var(--text)}
 .ms-btn.on{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
-.ms-pop{position:absolute;top:calc(100% + 6px);left:0;z-index:30;width:300px;max-width:calc(100vw - 32px);background:var(--o-raised);border:1px solid var(--o-axis);border-radius:12px;
-  box-shadow:0 12px 32px rgba(0,0,0,.18);padding:8px;display:grid;gap:6px}
+.ms-pop{position:absolute;top:calc(100% + 6px);left:0;z-index:30;width:300px;max-width:calc(100vw - 32px);background:var(--o-raised);border:1px solid var(--o-axis);border-radius:8px;
+  box-shadow:0 4px 16px rgba(0,0,0,.08);padding:8px;display:grid;gap:6px}
 .ms-pop input[type="search"]{width:100%;box-sizing:border-box}
 .ms-acts{display:flex;justify-content:space-between;gap:8px;padding:0 2px}
 .ms-list{max-height:320px;overflow:auto;display:grid;gap:1px}
@@ -234,7 +234,7 @@
 .ms-list label:hover{background:var(--o-hover)}
 .ms-list label span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ms-list label small{color:var(--muted);margin-left:auto;padding-left:8px;white-space:nowrap;font-size:12px}
-.ms-list .g{font-weight:700;font-size:11px;letter-spacing:.06em;text-transform:uppercase;margin-top:4px}
+.ms-list .g{font-weight:600;font-size:11px;letter-spacing:.06em;text-transform:uppercase;margin-top:4px}
 .ms-list .g:first-child{margin-top:0}
 .ms-list label.it{padding-left:24px}
 .ms-list input{margin:0;accent-color:var(--accent);flex:none}
@@ -242,7 +242,7 @@
 .cc-check{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--o-ink2);cursor:pointer}
 .cc-check input{margin:0;accent-color:var(--accent)}
 @media (max-width:640px){ .ms-btn{min-width:140px;max-width:200px} }
-.cc-start label.cc-btn-alt{background:transparent;color:var(--link);box-shadow:inset 0 0 0 1px var(--link)}
+.cc-start label.cc-btn-alt{background:transparent;color:var(--text);box-shadow:inset 0 0 0 1px var(--line-strong)}
 .cc-hint{font-size:15px !important;margin-top:16px !important}
 .cc-hint b{font-weight:600;color:var(--text)}
 .cc #tFiles td:last-child{text-align:right}
@@ -250,12 +250,12 @@
 .cc-x:hover{text-decoration:underline}
 /* the checklist sits inside a filter .field, whose small-caps label style must not reach it */
 .field .ms-list label{display:flex;font-size:13px;font-weight:400;text-transform:none;letter-spacing:normal;color:var(--text)}
-.field .ms-list label.g{font-weight:700;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--o-ink2)}
+.field .ms-list label.g{font-weight:600;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--o-ink2)}
 .field .ms-list label small{font-size:12px;color:var(--muted);text-transform:none;letter-spacing:normal}
 .cc #tFiles th,.cc #tFiles td{text-align:left}
 .cc #tFiles th:nth-child(4),.cc #tFiles td:nth-child(4),.cc #tFiles td:last-child{text-align:right}
 .cc-pending{margin:28px auto 0;max-width:520px;text-align:left}
-.cc-pending ul{list-style:none;margin:0;padding:0;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--o-card)}
+.cc-pending ul{list-style:none;margin:0;padding:0;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--o-card)}
 .cc-pending li{display:flex;align-items:baseline;gap:10px;padding:10px 14px;font-size:15px;border-bottom:1px solid var(--line)}
 .cc-pending li:last-child{border-bottom:0}
 .cc-pending li b{font-weight:600}
