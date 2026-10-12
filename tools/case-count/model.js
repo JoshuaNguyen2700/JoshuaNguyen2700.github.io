@@ -94,51 +94,64 @@ export function buildLayout(M, ovr = new Map()) {
   const L = { fromBook: !!(T && T.sections.length), month: T && T.month, sections: [], cust: [] };
   if (L.fromBook) {
     const all = D.people.map((_, i) => i);
+    // 1. fixes from the Names tab or a ROSTER tab, 2. the name, 3. the numbers. Every section is matched by
+    // name before any numbers are used, so loading one team's files or both puts people on the same rows.
+    const cands = new Map();   // row -> people whose name fits it
     for (const s of T.sections) {
-      const rows = s.labels.map((label) => ({ key: s.name + '|' + label, label, p: -1, how: 'Not in the loaded files' }));
-      const used = new Set();
-      // 1. fixes from the Names tab or a ROSTER tab, 2. the name, 3. the numbers
+      const rows = s.labels.map((label) => ({ key: s.name + '|' + label, label, sec: s.name, p: -1, how: 'Not in the loaded files' }));
       for (const r of rows) {
-        if (ovr.has(r.key)) { r.p = ovr.get(r.key); r.how = 'Picked on this page'; }
-        else {
-          const ro = (T.roster || []).find((x) => labelEq(x.label, r.label) && (!x.section || labelEq(x.section, s.name)));
-          const p = ro ? personByName(M, ro.name) : -1;
-          if (p >= 0) { r.p = p; r.how = 'ROSTER tab'; }
-          else {
-            const cands = all.filter((i) => nameHit(r.label, D.people[i]));
-            if (cands.length === 1) { r.p = cands[0]; r.how = 'Name'; }
-            else if (cands.length > 1) {
-              const scored = cands.map((i) => [i, fit(M, r.key, i)]).filter((x) => x[1] != null).sort((a, b) => a[1] - b[1]);
-              r.p = scored.length ? scored[0][0] : cands.sort((a, b) => activity(M, b) - activity(M, a))[0];
-              r.how = scored.length ? 'Name and numbers' : 'Name (several match: check)';
-            }
-          }
-        }
-        if (r.p >= 0) used.add(r.p);
-      }
-      for (const r of rows) {
-        if (r.p >= 0 || ovr.has(r.key)) continue;
-        const best = all.filter((i) => !used.has(i)).map((i) => [i, fit(M, r.key, i)]).filter((x) => x[1] != null && x[1] <= 0.35).sort((a, b) => a[1] - b[1])[0];
-        if (best) { r.p = best[0]; r.how = 'Numbers match'; used.add(best[0]); }
+        if (ovr.has(r.key)) { r.p = ovr.get(r.key); r.how = 'Picked on this page'; continue; }
+        const ro = (T.roster || []).find((x) => labelEq(x.label, r.label) && (!x.section || labelEq(x.section, s.name)));
+        const p = ro ? personByName(M, ro.name) : -1;
+        if (p >= 0) { r.p = p; r.how = 'ROSTER tab'; continue; }
+        const cs = all.filter((i) => nameHit(r.label, D.people[i]));
+        if (cs.length) cands.set(r, cs);
       }
       L.sections.push({ name: s.name, rows });
     }
+    // Which team folder each section mostly holds, from the rows only one person's name fits (a supervisor
+    // section is mostly one team), so a shared first name goes to the section of that person's own team.
+    const secTeam = new Map();
+    for (const s of L.sections) {
+      const m = new Map();
+      for (const r of s.rows) { const p = r.p >= 0 ? r.p : cands.has(r) && cands.get(r).length === 1 ? cands.get(r)[0] : -1; const t = M.I.pteam.get(p); if (t != null) m.set(t, (m.get(t) || 0) + 1); }
+      secTeam.set(s.name, m);
+    }
+    const teamFit = (r, p) => secTeam.get(r.sec).get(M.I.pteam.get(p)) || 0;
+    const fitOr = (r, p) => { const f = fit(M, r.key, p); return f == null ? Infinity : f; };
+    const better = (r, a, b) => teamFit(r, b) - teamFit(r, a) || fitOr(r, a) - fitOr(r, b) || activity(M, b) - activity(M, a);   // < 0: a fits r better
+    for (const [r, cs] of cands) {
+      r.p = [...cs].sort((a, b) => better(r, a, b))[0];
+      r.how = cs.length === 1 ? 'Name' : secTeam.get(r.sec).size ? 'Name and team' : 'Name (several match: check)';
+    }
     // One person fills one row. If a name matched the same person in two sections (two people with the
-    // same first name, only one of them in the loaded files), the row whose own numbers fit that person best keeps them.
+    // same first name, only one of them in the loaded files), the row in that person's team's section keeps them.
     const claims = new Map();
-    for (const s of L.sections) for (const r of s.rows) if (r.p >= 0 && !ovr.has(r.key) && r.how !== 'ROSTER tab') { if (!claims.has(r.p)) claims.set(r.p, []); claims.get(r.p).push(r); }
-    for (const rs of claims.values()) {
+    for (const s of L.sections) for (const r of s.rows) if (cands.has(r) && r.p >= 0) { if (!claims.has(r.p)) claims.set(r.p, []); claims.get(r.p).push(r); }
+    for (const [p, rs] of claims) {
       if (rs.length < 2) continue;
-      const score = (r) => { const f = fit(M, r.key, r.p); return f == null ? Infinity : f; };
-      const keep = rs.reduce((a, b) => (score(b) < score(a) ? b : a));
+      const keep = rs.reduce((a, b) => (teamFit(b, p) - teamFit(a, p) || fitOr(a, p) - fitOr(b, p) || 0) > 0 ? b : a);
       for (const r of rs) if (r !== keep) { r.p = -1; r.how = 'Not in the loaded files'; }
+    }
+    // Rows no name fits (a nickname that isn't in Salesforce) take the person whose numbers fit best, but
+    // never someone already on a row or whose own name fits a row (they belong there, loaded or not).
+    const used = new Set(L.sections.flatMap((s) => s.rows.map((r) => r.p)));
+    const labels = L.sections.flatMap((s) => s.rows.map((r) => r.label));
+    const free = all.filter((i) => !used.has(i) && !labels.some((l) => nameHit(l, D.people[i])));
+    for (const s of L.sections) for (const r of s.rows) {
+      if (r.p >= 0 || ovr.has(r.key) || cands.has(r)) continue;
+      const best = free.filter((i) => !used.has(i)).map((i) => [i, fit(M, r.key, i)]).filter((x) => x[1] != null && x[1] <= 0.35).sort((a, b) => a[1] - b[1])[0];
+      if (best) { r.p = best[0]; r.how = 'Numbers match'; used.add(best[0]); }
     }
     const findRow = (sec, label) => { const s = L.sections.find((x) => x.name === sec); const pool = s ? [s] : L.sections; for (const x of pool) { const r = x.rows.find((y) => labelEq(y.label, label)); if (r) return r; } return null; };
     // CUST E-MAILS blocks: the rep comes from the E-MAILS ACTIONED formulas, else from the name
     T.cust.forEach((b, bi) => {
       const r = (b.ref && findRow(b.ref.section, b.ref.label)) || findRow(null, b.label), p = r ? r.p : -1, allowed = teamCompanies(M, p);
+      // A rep who isn't in the loaded files (the other team's exports) gets no customer matches, rather than
+      // look-alike companies from the team that is loaded.
+      const none = p < 0 && !b.mailbox && r;
       L.cust.push({ id: bi, label: b.label, p, rowKey: r ? r.key : null, mailbox: b.mailbox, ceva: b.ceva, total: b.total || !b.mailbox,
-        customers: b.customers.map((c, ci) => ({ id: bi + ':' + ci, label: c, comps: matchCompanies(M, c, allowed) })) });
+        customers: b.customers.map((c, ci) => ({ id: bi + ':' + ci, label: c, comps: none ? [] : matchCompanies(M, c, allowed) })) });
     });
   } else {
     // Without the workbook: one section per team folder, full names A to Z, and per person the
