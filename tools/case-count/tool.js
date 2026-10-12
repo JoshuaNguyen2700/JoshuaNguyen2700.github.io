@@ -521,7 +521,7 @@ function render() {
   const F = filters();
   const secs = [...S.secs], who = S.people.size ? plural(F.rows.size, 'person').replace('persons', 'people') : secs.length === L.sections.length ? (L.fromBook ? 'everyone' : 'all teams') : secs.join(' / ');
   const t = S.tab;
-  $('#eyebrow').textContent = `${t === 'sla' ? 'SLA response time' : 'Actioned & closed case count'} · ${who}${F.cust && t !== 'sla' ? ` · ${plural(F.cust.size, 'customer')}` : ''}`;
+  $('#eyebrow').textContent = `Salesforce Data · ${who}${F.cust && t !== 'sla' ? ` · ${plural(F.cust.size, 'customer')}` : ''}`;
   $('#range').innerHTML = `<b>${esc(span(S.from, S.to))}</b>` + (t === 'sla' ? ' · every day' : ` · ${plural(F.days.length, S.weekends ? 'day' : 'weekday')}`);
   if (t === 'over') { const series = daily(M, L, F); renderTiles(series); dailyChart($('#cDaily'), series); renderTable($('#tPerson'), summaryModel(M, L, F)); renderTop(F); }
   else if (t === 'cases') renderCases(F);
