@@ -280,7 +280,7 @@
 /* SLA drill-down: rows open with an arrow to show the second grouping */
 .cc .sla-then{font-size:13px;color:var(--muted);margin-left:6px}
 .cc table.sla .tog{display:inline-block;width:16px;height:16px;margin:0 6px 0 -4px;padding:0;border:0;background:none;color:var(--muted);cursor:pointer;vertical-align:-3px}
-.cc table.sla .tog::before{content:'\25B8';font-size:12px}
+.cc table.sla .tog::before{content:'\25B8';font-size:15px;line-height:16px}
 .cc table.sla .tog.open::before{content:'\25BE'}
 .cc table.sla .tog:hover{color:var(--text)}
 .cc table.sla tr.lv0 td{font-weight:600}
