@@ -265,6 +265,7 @@
 .cc-pending .cc-hint{text-align:left}
 
 /* ---- SLA tab ---- */
+.cc table.mx.sla{width:100%}   /* few columns: fill the card instead of sizing to the content */
 .cc table.sla th.met{color:var(--good)}
 .cc table.sla th.br{color:var(--crit)}
 .cc table.sla tbody tr[data-sel]{cursor:pointer}
