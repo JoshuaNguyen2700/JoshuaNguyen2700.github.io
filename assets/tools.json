@@ -1,12 +1,22 @@
 {
   "tools": [
     {
-      "id": "sla",
-      "name": "SLA Dashboard",
-      "blurb": "Response time",
+      "id": "case-count",
+      "name": "Case Count & SLA",
+      "blurb": "Actioned & closed · Response time",
       "status": "live",
       "icon": "chart",
-      "standalone": true
+      "links": [
+        {
+          "id": "case-count",
+          "label": "Case Count"
+        },
+        {
+          "id": "sla",
+          "label": "SLA Dashboard",
+          "standalone": true
+        }
+      ]
     },
     {
       "id": "otp",
@@ -22,13 +32,6 @@
       "status": "live",
       "icon": "chart",
       "standalone": true
-    },
-    {
-      "id": "case-count",
-      "name": "Case Count",
-      "blurb": "Actioned & closed",
-      "status": "live",
-      "icon": "chart"
     },
     {
       "id": "apple-dom",

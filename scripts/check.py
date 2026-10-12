@@ -139,6 +139,13 @@ def check_bus(tools):
 
 def main():
     tools = check_registry(load_registry())
+    # A grouped tile ("links") points at more tools; each one is checked like a tile of its own.
+    for t in list(tools):
+        for link in t.get('links') or []:
+            if not any(x['id'] == link.get('id') for x in tools):
+                if not (TOOLS / str(link.get('id')) / 'index.html').is_file():
+                    errors.append(f'tools.json: "{t["id"]}" links to tools/{link.get("id")}/, which has no index.html')
+                tools.append(link)
     ids = [t['id'] for t in tools]
     check_unregistered(set(ids))
     check_isolation(ids)

@@ -51,6 +51,12 @@
 .tile .cta{grid-area:cta;font-size:0;color:var(--muted);transition:color .2s ease,transform .2s ease}
 .tile .cta::after{content:'\2192';font-size:18px}
 .tile:hover .cta{color:var(--text);transform:translateX(4px)}
+/* A tile that groups several tools: one link per tool on the right */
+.tile.group{grid-template-columns:1fr auto;grid-template-areas:"name links" "blurb links"}
+.tile.group .links{grid-area:links;display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.tile.group .links a{font-size:13px;padding:6px 12px;border:1px solid var(--line);border-radius:999px;color:var(--text);white-space:nowrap;transition:border-color .2s ease}
+.tile.group .links a:hover{text-decoration:none;border-color:var(--text)}
+.tile.group .links a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
 /* Icons: built-in SVGs, or a tool's own .svg file drawn through a mask so it follows the theme */
 .icon{display:block;width:64px;height:64px;flex:none;color:var(--text)}
@@ -75,6 +81,8 @@
 @media (max-width:640px){
   .hero{padding-top:80px;padding-bottom:48px}
   .tile{padding:18px 2px}
+  .tile.group{grid-template-columns:1fr;grid-template-areas:"name" "blurb" "links"}
+  .tile.group .links{justify-content:flex-start;margin-top:12px}
 }
 @media (prefers-reduced-motion:reduce){
   .tile .cta,.btn,.nav-inner a,.theme-btn{transition:none}

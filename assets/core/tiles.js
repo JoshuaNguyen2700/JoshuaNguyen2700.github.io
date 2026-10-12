@@ -24,7 +24,18 @@ function iconEl(t){
   return tpl.content.firstChild;
 }
 
+// A tile with "links" groups several tools in one row, with a link to each
+function groupTile(t){
+  const div = document.createElement('div');
+  div.className = 'tile live group';
+  div.innerHTML = '<h2>' + esc(t.name) + '</h2>' +
+    (t.blurb ? '<p>' + esc(t.blurb) + '</p>' : '') +
+    '<span class="links">' + t.links.map(l => '<a href="' + esc(toolUrl(l)) + '">' + esc(l.label) + '</a>').join('') + '</span>';
+  return div;
+}
+
 function tile(t){
+  if (Array.isArray(t.links) && t.links.length) return groupTile(t);
   const status = STATUS[t.status] ? t.status : 'soon';
   const s = STATUS[status];
   const a = document.createElement('a');
