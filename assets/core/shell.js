@@ -1,5 +1,5 @@
-// Shared page frame: fills <header data-shell="nav"> and <footer data-shell="footer"> on any page
-// that includes them. Change the nav or footer here and every page picks it up.
+// Shared page frame: fills <header data-shell="nav"> on any page that includes it.
+// Change the nav here and every page picks it up.
 import { SITE } from './site.js';
 import { esc } from './util.js';
 
@@ -27,10 +27,3 @@ if (nav){
 // Any <a data-shell="contact"> links to the site owner's contact page
 document.querySelectorAll('a[data-shell="contact"]').forEach(a => { a.href = SITE.contact; });
 
-const foot = document.querySelector('[data-shell="footer"]');
-if (foot){
-  foot.innerHTML = '<div class="foot-inner">' +
-    '<span>© ' + new Date().getFullYear() + ' ' + esc(SITE.name) + '</span>' +
-    '<a href="' + esc(SITE.github) + '">' + esc(SITE.github.replace(/^https?:\/\//, '')) + '</a>' +
-  '</div>';
-}

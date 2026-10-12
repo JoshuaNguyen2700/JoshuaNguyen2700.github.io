@@ -71,11 +71,6 @@
 .center{display:flex;align-items:center;justify-content:center}
 .empty{grid-column:1/-1;text-align:center;color:var(--muted);padding:48px 0}
 
-/* Footer. shell.js fills it. */
-[data-shell="footer"]{border-top:1px solid var(--line);color:var(--muted);font-size:13px}
-.foot-inner{max-width:var(--max-width);margin:0 auto;padding:24px var(--gutter) 48px;display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
-.foot-inner a{color:var(--muted)}
-.foot-inner a:hover{color:var(--text)}
 
 @media (max-width:640px){
   .hero{padding-top:80px;padding-bottom:48px}

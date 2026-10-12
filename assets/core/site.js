@@ -1,4 +1,4 @@
-// Site-wide settings used by the shared nav, footer and home page.
+// Site-wide settings used by the shared nav and home page.
 export const SITE = {
   name: 'Joshua Nguyen',
   github: 'https://github.com/JoshuaNguyen2700',
