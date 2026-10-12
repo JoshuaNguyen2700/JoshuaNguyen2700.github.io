@@ -33,7 +33,7 @@ const TABS = ['over', 'cases', 'cust', 'sla', 'names'];
 // Tabs with something to show for the reports loaded
 const tabOn = (t) => ({ over: M.has.cc, cases: M.has.act || M.has.clo, cust: L.cust.length > 0, sla: M.has.sla, names: true })[t];
 const dflt = () => ({ secs: new Set(L.sections.map((s) => s.name)), teams: new Set(M.D.teams.map((_, i) => i)), people: new Set(), cust: new Set(), from: M.X.lo, to: M.X.hi,
-  slaBy: 'owner', slaSel: null, slaRes: '', slaLimit: 200 });
+  slaBy: 'owner', slaBy2: '', slaOpen: new Set(), slaSel: null, slaRes: '', slaLimit: 200 });
 
 function load(data) {
   M = prepare(data); OVR.clear(); L = buildLayout(M, OVR);
@@ -320,7 +320,9 @@ function renderTable(el, m) {
   if (!el) return;
   if (!m.rows.length || (m.n === 0)) { el.innerHTML = emptyMsg(m.empty || 'Nothing for these filters.'); return; }
   const th = m.cols.map((c) => `<th class="${c.cls || ''}">${c.h}</th>`).join('');
-  const body = m.rows.map((r) => `<tr class="${r.cls || ''}"${r.sel != null ? ` data-sel="${esc(r.sel)}"` : ''}>${r.c.map((c, i) => `<td class="${[m.cols[i] && m.cols[i].cls, c.cls].filter(Boolean).join(' ')}"${c.title ? ` title="${esc(c.title)}"` : ''}>${cellHtml(c)}</td>`).join('')}</tr>`).join('');
+  // r.tog ('open' / 'shut'): a row that opens to show the rows under it
+  const tog = (r) => (r.tog ? `<button class="tog ${r.tog}" type="button" data-tog="${esc(r.sel)}" aria-expanded="${r.tog === 'open'}" aria-label="${r.tog === 'open' ? 'Close' : 'Open'}"></button>` : '');
+  const body = m.rows.map((r) => `<tr class="${r.cls || ''}"${r.sel != null ? ` data-sel="${esc(r.sel)}"` : ''}>${r.c.map((c, i) => `<td class="${[m.cols[i] && m.cols[i].cls, c.cls].filter(Boolean).join(' ')}"${c.title ? ` title="${esc(c.title)}"` : ''}>${i ? '' : tog(r)}${cellHtml(c)}</td>`).join('')}</tr>`).join('');
   el.innerHTML = `<table class="${m.cls || ''}"><thead><tr>${th}</tr></thead><tbody>${body}</tbody></table>`;
 }
 
@@ -418,6 +420,9 @@ function renderSla(F) {
   const G = slaGroups(M, L);
   if (!$('#slaBy').options.length) $('#slaBy').innerHTML = SLA_G.map((k) => `<option value="${k}">${esc(G[k].name)}</option>`).join('');
   $('#slaBy').value = S.slaBy;
+  $('#slaBy2').innerHTML = `<option value="">Nothing</option>` + SLA_G.filter((k) => k !== S.slaBy).map((k) => `<option value="${k}">${esc(G[k].name)}</option>`).join('');
+  $('#slaBy2').value = S.slaBy2;
+  $('#slaOpenAll').hidden = !S.slaBy2;
   const rows = slaRows(M, L, F), s = slaStats(rows), pct = (n) => (s.n ? fmtP(n / s.n, 1) : '–');
   $('#slaTiles').innerHTML =
     tile('SLA cases', fmtN(s.n), 'opened in the dates shown') +
@@ -428,19 +433,31 @@ function renderSla(F) {
   $('#slaNote').textContent = `Cases count on the day they were opened, weekends included. Elapsed time is the time to first response, as in the SLA Dashboard.` +
     (off ? ` ${plural(off, 'case')} owned by people with no row (queues, supervisors) aren't counted; they're on the Names & sources tab.` : '') +
     (M.XS.lo < S.from || M.XS.hi > S.to ? ` The SLA export covers ${span(M.XS.lo, M.XS.hi)}; widen the dates to see more.` : '');
-  renderTable($('#tSla'), slaModel(M, L, rows, S.slaBy, S.slaSel));
-  let pick = slaPick(M, L, rows, S.slaBy, S.slaSel);
+  const sm = slaModel(M, L, rows, S.slaBy, S.slaSel, S.slaBy2, S.slaOpen);
+  renderTable($('#tSla'), sm);
+  const tops = sm.rows.filter((r) => r.tog), allOpen = tops.length && tops.every((r) => r.tog === 'open');
+  $('#slaOpenAll').textContent = allOpen ? 'Close all' : 'Open all';
+  let pick = slaPick(M, L, rows, S.slaBy, S.slaSel, S.slaBy2);
   if (S.slaRes !== '') pick = pick.filter((r) => String(r[7]) === S.slaRes);
   const cm = slaCasesModel(M, pick, S.slaLimit);
   renderTable($('#tSlaCases'), cm);
-  const selLabel = S.slaSel != null ? $(`#tSla tr[data-sel="${CSS.escape(S.slaSel)}"] td`)?.textContent : null;
+  const selRow = S.slaSel != null ? $(`#tSla tr[data-sel="${CSS.escape(S.slaSel)}"] td`) : null;
+  const parent = S.slaSel != null && S.slaSel.includes('\u0001') ? $(`#tSla tr[data-sel="${CSS.escape(S.slaSel.split('\u0001')[0])}"] td`) : null;
+  const selLabel = selRow ? (parent ? parent.textContent + ' › ' : '') + selRow.textContent : null;
   $('#slaCasesSub').innerHTML = (cm.total ? `showing ${fmtN(Math.min(cm.total, S.slaLimit))} of ${plural(cm.total, 'case')}, newest first` : '') +
     (selLabel ? ` · <b>${esc(selLabel)}</b> <button class="cc-linkbtn" type="button" id="slaClear">show all</button>` : '');
   $('#slaMoreWrap').hidden = cm.total <= S.slaLimit;
   document.querySelectorAll('#slaRes button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.r === S.slaRes)));
 }
-$('#slaBy').addEventListener('change', (e) => { S.slaBy = e.target.value; S.slaSel = null; S.slaLimit = 200; render(); });
+$('#slaBy').addEventListener('change', (e) => { S.slaBy = e.target.value; if (S.slaBy2 === S.slaBy) S.slaBy2 = ''; S.slaOpen = new Set(); S.slaSel = null; S.slaLimit = 200; render(); });
+$('#slaBy2').addEventListener('change', (e) => { S.slaBy2 = e.target.value; S.slaOpen = new Set(); S.slaSel = null; S.slaLimit = 200; render(); });
+$('#slaOpenAll').addEventListener('click', () => {
+  const tops = [...document.querySelectorAll('#tSla [data-tog]')].map((b) => b.dataset.tog);
+  S.slaOpen = tops.every((k) => S.slaOpen.has(k)) ? new Set() : new Set(tops); render();
+});
 $('#tSla').addEventListener('click', (e) => {
+  const t = e.target.closest('[data-tog]');
+  if (t) { const k = t.dataset.tog; if (S.slaOpen.has(k)) S.slaOpen.delete(k); else S.slaOpen.add(k); render(); return; }
   const tr = e.target.closest('tr[data-sel]'); if (!tr) return;
   S.slaSel = S.slaSel === tr.dataset.sel ? null : tr.dataset.sel; S.slaLimit = 200; render();
 });
@@ -629,7 +646,7 @@ async function exportExcel() {
     if (M.has.sla) {
       // The SLA table grouped as on the page, and every SLA case in the filters
       const rows = slaRows(M, L, F), sum = xSheet();
-      sum.model(slaModel(M, L, rows, S.slaBy, null), null, false);
+      sum.model(slaModel(M, L, rows, S.slaBy, null, S.slaBy2, 'all'), null, false);
       add('SLA', sum, [{ wch: 28 }, { wch: 12 }]);
       const list = xSheet(); list.model(slaCasesModel(M, rows, Infinity), null, false);
       add('SLA CASES', list, [{ wch: 11 }, { wch: 18 }, { wch: 18 }, { wch: 20 }, { wch: 28 }, { wch: 40 }, { wch: 18 }, { wch: 12 }, { wch: 9 }]);

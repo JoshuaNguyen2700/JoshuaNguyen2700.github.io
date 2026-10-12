@@ -444,20 +444,40 @@ export function slaGroups(M, L) {
   };
 }
 // The SLA matrix: per group, SLA met and breached (average elapsed time and cases), then the total and SLA met %.
-export function slaModel(M, L, rows, by, sel) {
-  const G = slaGroups(M, L)[by], m = new Map();
+// With a second grouping (by2), each row can be opened (open: Set of row keys, or 'all') to show its rows by that.
+// Row keys: "k" for a top row, "k\u0001k2" for a row under it.
+const SEP = '\u0001';
+function slaGroupBy(G, rows) {
+  const m = new Map();
   for (const r of rows) { const k = G.key(r); let a = m.get(k); if (!a) m.set(k, (a = [])); a.push(r); }
-  let groups = [...m].map(([k, rs]) => ({ k, rs, s: slaStats(rs), l: G.label(k, rs) }));
-  groups.sort(G.order === 'k' ? (a, b) => a.k - b.k : G.order === 't' ? (a, b) => byText(a.l, b.l) : (a, b) => b.s.n - a.s.n || byText(a.l, b.l));
-  const cols = [col(G.name), col('Met<small>avg elapsed</small>', 'met', 'Met avg elapsed'), col('Met<small>cases</small>', 'met', 'Met cases'),
+  const groups = [...m].map(([k, rs]) => ({ k, rs, s: slaStats(rs), l: G.label(k, rs) }));
+  return groups.sort(G.order === 'k' ? (a, b) => a.k - b.k : G.order === 't' ? (a, b) => byText(a.l, b.l) : (a, b) => b.s.n - a.s.n || byText(a.l, b.l));
+}
+export function slaModel(M, L, rows, by, sel, by2, open) {
+  const GS = slaGroups(M, L), G = GS[by], G2 = by2 && by2 !== by ? GS[by2] : null;
+  const groups = slaGroupBy(G, rows);
+  const cols = [col(G2 ? `${G.name} › ${G2.name}` : G.name, '', G2 ? `${G.name} / ${G2.name}` : G.name), col('Met<small>avg elapsed</small>', 'met', 'Met avg elapsed'), col('Met<small>cases</small>', 'met', 'Met cases'),
     col('Breached<small>avg elapsed</small>', 'br', 'Breached avg elapsed'), col('Breached<small>cases</small>', 'br', 'Breached cases'),
     col('Total<small>avg elapsed</small>', 'wk', 'Total avg elapsed'), col('Total<small>cases</small>', 'wk', 'Total cases'), col('SLA met %', 'wk')];
   const cells = (s) => [cT(slaAvg(s.m)), cN(s.m.n), cT(slaAvg(s.b)), cN(s.b.n, s.b.n ? 'low' : ''), cT(slaAvg(s)), cZ(s.n), cQ(s.n ? s.met / s.n : null)];
-  const out = groups.map((g) => ({ cls: sel === String(g.k) ? 'selr' : '', sel: String(g.k), c: [cS(g.l, '', G.title ? G.title(g.k) : g.l), ...cells(g.s)] }));
+  const out = [];
+  for (const g of groups) {
+    const key = String(g.k), isOpen = !!G2 && (open === 'all' || (open && open.has(key)));
+    out.push({ cls: [sel === key ? 'selr' : '', G2 ? 'lv0' : ''].filter(Boolean).join(' '), sel: key, tog: G2 ? (isOpen ? 'open' : 'shut') : null,
+      c: [cS(g.l, '', G.title ? G.title(g.k) : g.l), ...cells(g.s)] });
+    if (isOpen) for (const h of slaGroupBy(G2, g.rs)) {
+      const k2 = key + SEP + h.k;
+      out.push({ cls: ['lv1', sel === k2 ? 'selr' : ''].filter(Boolean).join(' '), sel: k2, c: [cS(h.l, 'indent', G2.title ? G2.title(h.k) : h.l), ...cells(h.s)] });
+    }
+  }
   if (groups.length > 1) out.push({ cls: 'total', c: [cS('Total'), ...cells(slaStats(rows))] });
   return { cls: 'mx sla', cols, rows: out, empty: 'No SLA cases for these filters.' };
 }
-export const slaPick = (M, L, rows, by, sel) => { if (sel == null) return rows; const G = slaGroups(M, L)[by]; return rows.filter((r) => String(G.key(r)) === sel); };
+export function slaPick(M, L, rows, by, sel, by2) {
+  if (sel == null) return rows;
+  const GS = slaGroups(M, L), [k1, k2] = sel.split(SEP), G2 = by2 && GS[by2];
+  return rows.filter((r) => String(GS[by].key(r)) === k1 && (k2 == null || !G2 || String(G2.key(r)) === k2));
+}
 const mdt = (min) => { if (min == null) return ''; const d = new Date(min * 6e4); let h = d.getUTCHours(); const ap = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12; return `${d.getUTCMonth() + 1}/${d.getUTCDate()}/${d.getUTCFullYear()} ${h}:${String(d.getUTCMinutes()).padStart(2, '0')} ${ap}`; };
 // The case list under the matrix, newest first.
 export function slaCasesModel(M, rows, limit) {

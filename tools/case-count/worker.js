@@ -247,6 +247,38 @@ function kindOf(h, rows) {
 // Files picked on their own (no team folder in the path) take their team from their contents: first from
 // cases they share with files whose team is known, then from the sender on a sent-emails report
 // ("CEVA Ground USEAST" -> East, "CEVA Ground USCORPORATE-LEGACY" -> Legacy), then shared cases again.
+// The team a report names itself: the mailbox on a sent-emails report ("CEVA Ground USCENTRAL" -> Central)
+// or the one branch on an SLA export ("CSG-USCENTRAL" -> Central). null when it doesn't say.
+function senderTeam(name) {
+  if (!/^CEVA\b/i.test(name || '')) return null;
+  const s = name.replace(/^CEVA\s+Ground\s*/i, '').split(/[-_]/).pop().replace(/^US(?=[A-Z]{3,})/i, '');
+  return s ? teamLabel(s) : null;
+}
+function ownTeam(f) {
+  if (f.kind === 'sla') return f.branches && f.branches.size === 1 ? branchTeam([...f.branches][0]) : null;
+  if (f.kind !== 'sent' || !f.senders || !f.senders.size) return null;
+  const all = [...f.senders].sort((a, b) => b[1] - a[1]), n = all.reduce((a, x) => a + x[1], 0);
+  return all[0][1] >= n / 2 ? senderTeam(all[0][0]) : null;
+}
+// A folder's name can be anything ("All Cview files", "EAST 10-9"): when its reports name their team, every
+// report in that folder takes that team, so the same team loaded from two folders is still one team.
+function teamsFromFolders(files, K) {
+  const dir = (f) => f.path.split('/').slice(0, -1).join('/');
+  const byDir = new Map();
+  // (only reports inside a team folder; files picked on their own are placed by teamsFromContents)
+  for (const f of files) if (f.kind && f.kind !== 'workbook' && f.kind !== 'history' && f.team && f.path.includes('/')) { const d = dir(f); if (!byDir.has(d)) byDir.set(d, []); byDir.get(d).push(f); }
+  for (const fs of byDir.values()) {
+    const named = [...new Set(fs.map(ownTeam).filter(Boolean))];
+    if (named.length !== 1) continue;   // nothing says, or the reports disagree: keep the folder name
+    const team = named[0];
+    for (const f of fs) {
+      if (f.team === team) continue;
+      const old = f.team, i = files.indexOf(f);
+      f.team = team;
+      for (const k of Object.keys(K)) for (const v of K[k].values()) if (v.fi === i && v.folder === old) v.folder = team;
+    }
+  }
+}
 function teamsFromContents(files) {
   const loose = () => files.filter((f) => !f.team && f.kind && f.kind !== 'workbook' && f.kind !== 'history' && f.senders);   // case history covers every team
   const byCases = () => {
@@ -262,9 +294,8 @@ function teamsFromContents(files) {
   byCases();
   for (const f of loose()) {
     const top = [...f.senders].sort((a, b) => b[1] - a[1])[0];
-    if (!top) continue;
-    const s = top[0].replace(/^CEVA\s+Ground\s*/i, '').split(/[-_]/).pop().replace(/^US(?=[A-Z]{3,})/i, '');
-    if (s) f.team = teamLabel(s);
+    const t = top && senderTeam(top[0]);
+    if (t) f.team = t;
   }
   byCases();
 }
@@ -363,7 +394,7 @@ async function build(items) {
     // An SLA export that covers one branch belongs to that team (unless it sits in a team folder); one that
     // covers several branches gives each case its own branch's team.
     if (kind === 'sla') {
-      if (info.branches.size === 1 && !info.team) info.team = branchTeam([...info.branches][0]);
+      if (info.branches.size === 1 && !info.team) info.team = branchTeam([...info.branches][0]);   // a file picked on its own
       if (info.branches.size > 1) for (const v of local.values()) v.folder = branchTeam(v.branch) || info.team;
       delete info.senders;
     }
@@ -394,6 +425,7 @@ async function build(items) {
     }
     K.closed = kept;
   }
+  teamsFromFolders(files, K);
   teamsFromContents(files);
   for (const kind of ['sent', 'closed', 'received', 'sla']) for (const v of K[kind].values()) if (!v.folder && v.fi != null) v.folder = files[v.fi].team;
   // Closures from Case History take the team of the case in the other reports.

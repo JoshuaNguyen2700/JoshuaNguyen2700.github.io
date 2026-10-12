@@ -276,3 +276,13 @@
 .sla-more{display:flex;justify-content:center;padding:12px 0 4px}
 .cc table.sla-cases th,.cc table.sla-cases td{text-align:left}
 .cc table.sla-cases th:nth-child(9),.cc table.sla-cases td:nth-child(9),.cc table.sla-cases th:nth-child(10),.cc table.sla-cases td:nth-child(10){text-align:right}
+
+/* SLA drill-down: rows open with an arrow to show the second grouping */
+.cc .sla-then{font-size:13px;color:var(--muted);margin-left:6px}
+.cc table.sla .tog{display:inline-block;width:16px;height:16px;margin:0 6px 0 -4px;padding:0;border:0;background:none;color:var(--muted);cursor:pointer;vertical-align:-3px}
+.cc table.sla .tog::before{content:'\25B8';font-size:12px}
+.cc table.sla .tog.open::before{content:'\25BE'}
+.cc table.sla .tog:hover{color:var(--text)}
+.cc table.sla tr.lv0 td{font-weight:600}
+.cc table.sla tr.lv1 td{color:var(--o-ink2)}
+.cc table.sla tr.lv1 td:first-child{padding-left:36px}

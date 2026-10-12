@@ -132,7 +132,10 @@
       <div class="tiles-k" id="slaTiles"></div>
       <p class="note" id="slaNote"></p>
       <div class="card">
-        <div class="card-h"><h2>SLA by</h2><select id="slaBy" aria-label="Group the SLA table by"></select><span class="sub">click a row to list its cases</span><button class="cc-linkbtn copybtn" type="button" data-copy="#tSla" title="Copy this table, then paste into Excel">Copy</button></div>
+        <div class="card-h"><h2>SLA by</h2><select id="slaBy" aria-label="Group the SLA table by"></select>
+          <label class="sla-then" for="slaBy2">then by</label><select id="slaBy2" aria-label="Then open each row by"></select>
+          <button class="cc-linkbtn" id="slaOpenAll" type="button" hidden>Open all</button>
+          <span class="sub">click a row to list its cases</span><button class="cc-linkbtn copybtn" type="button" data-copy="#tSla" title="Copy this table, then paste into Excel">Copy</button></div>
         <div class="tscroll tall" id="tSla"></div>
       </div>
       <div class="card">
