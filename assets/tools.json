@@ -3,20 +3,9 @@
     {
       "id": "case-count",
       "name": "CView Dash",
-      "blurb": "Actioned & closed · Response time",
+      "blurb": "Actioned & closed · Customer emails · SLA",
       "status": "live",
-      "icon": "chart",
-      "links": [
-        {
-          "id": "case-count",
-          "label": "Case Count"
-        },
-        {
-          "id": "sla",
-          "label": "SLA Dashboard",
-          "standalone": true
-        }
-      ]
+      "icon": "chart"
     },
     {
       "id": "otp",
