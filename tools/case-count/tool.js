@@ -1,13 +1,15 @@
 // Logic for the case-count tool only. It is an ES module, so nothing here leaks into other pages.
 // The page ships with no case data. The visitor picks the Cview Report folder (team folders of Salesforce
-// exports, plus the ACTIONED & CLOSED CASE COUNT workbook); worker.js reads them in the browser and
-// model.js turns the counts into the workbook's tables. Nothing is uploaded.
+// exports, plus the ACTIONED & CLOSED CASE COUNT workbook and the SLA export); worker.js reads them in the
+// browser and model.js turns the counts into the workbook's tables and the SLA view. Nothing is uploaded.
+// Any one report works on its own: tabs with nothing to show are hidden.
 // Every filter applies to every tab: supervisor and team folder (chips), people and customers
 // (multi-select lists; nothing ticked = all), and dates.
 import { esc } from '/assets/core/util.js';
 import {
   GOAL, DOW, SHEET_MON, MON, dt, dowOf, md, dLong, span, isWeekday, monthKey, monthStart, monthEnd, byText,
   prepare, buildLayout, unlisted, casesModel, custModel, summaryModel, daily, topCustomers, visibleBlocks, col, cS, cN,
+  fmtHM, slaRows, slaOffRows, slaStats, slaAvg, slaGroups, slaModel, slaPick, slaCasesModel,
 } from './model.js';
 
 const $ = (s) => document.querySelector(s);
@@ -27,8 +29,11 @@ let M = null, L = null, S = null, worker = null;
 const OVR = new Map();   // name fixes made on the Names tab: row key -> person (this page only)
 const saved = (() => { try { return JSON.parse(localStorage.getItem(STATE_KEY)) || {}; } catch (e) { return {}; } })();
 const saveView = () => { try { localStorage.setItem(STATE_KEY, JSON.stringify({ tab: S.tab, weekends: S.weekends })); } catch (e) {} };
-const TABS = ['over', 'cases', 'cust', 'names'];
-const dflt = () => ({ secs: new Set(L.sections.map((s) => s.name)), teams: new Set(M.D.teams.map((_, i) => i)), people: new Set(), cust: new Set(), from: M.X.lo, to: M.X.hi });
+const TABS = ['over', 'cases', 'cust', 'sla', 'names'];
+// Tabs with something to show for the reports loaded
+const tabOn = (t) => ({ over: M.has.cc, cases: M.has.act || M.has.clo, cust: L.cust.length > 0, sla: M.has.sla, names: true })[t];
+const dflt = () => ({ secs: new Set(L.sections.map((s) => s.name)), teams: new Set(M.D.teams.map((_, i) => i)), people: new Set(), cust: new Set(), from: M.X.lo, to: M.X.hi,
+  slaBy: 'owner', slaSel: null, slaRes: '', slaLimit: 200 });
 
 function load(data) {
   M = prepare(data); OVR.clear(); L = buildLayout(M, OVR);
@@ -36,10 +41,11 @@ function load(data) {
   const tab = S ? S.tab : saved.tab, weekends = S ? S.weekends : !!saved.weekends;
   S = { ...dflt(), tab: TABS.includes(tab) ? tab : 'over', weekends };
   const usable = M.D.files.filter((f) => f.kind && f.kind !== 'workbook'), skipped = M.D.files.filter((f) => !f.kind);
-  $('#meta').textContent = `${plural(usable.length, 'report')} · ${span(M.X.lo, M.X.hi)}`;
+  $('#meta').textContent = `${plural(usable.length, 'report')} · ${span(M.XA.lo, M.XA.hi)}`;
   const KN = { sent: 'sent emails (cases actioned)', received: 'received emails', closed: 'closed cases' }, notes = [];
-  const miss = Object.keys(KN).filter((k) => !usable.some((f) => f.kind === k || (k === 'closed' && f.kind === 'history')));
-  if (!L.fromBook) notes.push('The ACTIONED & CLOSED CASE COUNT workbook wasn\'t in the files, so people are grouped by team folder with their full names. Load the Cview Report folder with the workbook in it (closed in Excel) to get the supervisor sections, names and customer rows.');
+  const miss = M.has.cc ? Object.keys(KN).filter((k) => !usable.some((f) => f.kind === k || (k === 'closed' && f.kind === 'history'))) : [];
+  if (M.has.cc && M.has.sla && (M.XS.lo < M.X.lo || M.XS.hi > M.X.hi)) notes.push(`The SLA export covers ${span(M.XS.lo, M.XS.hi)}, longer than the other reports, so the dates start at ${span(M.X.lo, M.X.hi)}. Choose "All dates" to see every SLA case.`);
+  if (!L.fromBook && M.has.cc) notes.push('The ACTIONED & CLOSED CASE COUNT workbook wasn\'t in the files, so people are grouped by team folder with their full names. Load the Cview Report folder with the workbook in it (closed in Excel) to get the supervisor sections, names and customer rows.');
   if (miss.length) notes.push(`No ${miss.map((k) => KN[k]).join(', ')} report was found, so those figures are 0.`);
   if (skipped.length) notes.push(`Skipped: ${skipped.map((f) => `${f.name.split('/').pop()} (${f.note})`).join(', ')}.`);
   const missing = L.fromBook ? L.sections.flatMap((s) => s.rows.filter((r) => r.p < 0).map((r) => `${r.label} (${s.name})`)) : [];
@@ -110,7 +116,7 @@ function readFiles(items) {
   count(); show('progress');
   if (worker) worker.terminate();
   worker = new Worker(new URL('worker.js', import.meta.url));
-  const KIND = { sent: 'emails sent', received: 'emails received', closed: 'cases closed', history: 'case history rows' };
+  const KIND = { sent: 'emails sent', received: 'emails received', closed: 'cases closed', history: 'case history rows', sla: 'SLA cases' };
   worker.onmessage = (e) => {
     const m = e.data;
     if (m.type === 'progress') {
@@ -244,18 +250,18 @@ function buildFilters() {
   $('#teamLabel').hidden = $('#teamChips').hidden = !multiTeam;
   $('#teamChips').innerHTML = M.D.teams.map((t, i) => [t, i]).sort((a, b) => byText(a[0], b[0]))
     .map(([t, i]) => `<button class="chip" type="button" data-t="${i}" aria-pressed="${S.teams.has(i)}">${esc(t)}</button>`).join('');
-  for (const id of ['#fFrom', '#fTo']) { $(id).min = toInput(M.X.lo); $(id).max = toInput(M.X.hi); }
+  for (const id of ['#fFrom', '#fTo']) { $(id).min = toInput(M.XA.lo); $(id).max = toInput(M.XA.hi); }
   $('#fFrom').value = toInput(S.from); $('#fTo').value = toInput(S.to);
   $('#fWeekends').checked = S.weekends;
   fillPeople(); fillCustomers(); quickDates();
 }
 // Quick ranges: everything loaded, each month the exports cover, and the latest Monday-to-Friday week.
 function quickRanges() {
-  const out = [['All dates', M.X.lo, M.X.hi]];
-  for (let k = monthKey(M.X.lo); k <= monthKey(M.X.hi); k++) out.push([`${MON[k % 12]} ${Math.floor(k / 12)}`, Math.max(monthStart(k), M.X.lo), Math.min(monthEnd(k), M.X.hi)]);
-  const mon = M.X.hi - ((M.X.hi + 3) % 7);
-  out.push(['Latest week', Math.max(mon, M.X.lo), Math.min(mon + 6, M.X.hi)]);
-  return out.length === 3 && out[1][1] === M.X.lo && out[1][2] === M.X.hi ? [out[0], out[2]] : out;
+  const X = M.XA, out = [['All dates', X.lo, X.hi]];
+  for (let k = monthKey(X.lo); k <= monthKey(X.hi); k++) out.push([`${MON[k % 12]} ${Math.floor(k / 12)}`, Math.max(monthStart(k), X.lo), Math.min(monthEnd(k), X.hi)]);
+  const mon = X.hi - ((X.hi + 3) % 7);
+  out.push(['Latest week', Math.max(mon, X.lo), Math.min(mon + 6, X.hi)]);
+  return out.length === 3 && out[1][1] === X.lo && out[1][2] === X.hi ? [out[0], out[2]] : out;
 }
 function quickDates() {
   $('#quick').innerHTML = quickRanges().map(([l, a, b]) => `<button type="button" data-a="${a}" data-b="${b}" aria-pressed="${S.from === a && S.to === b}">${esc(l)}</button>`).join('');
@@ -277,8 +283,8 @@ $('#teamChips').addEventListener('click', (e) => {
   document.querySelectorAll('#teamChips .chip').forEach((c) => c.setAttribute('aria-pressed', String(S.teams.has(+c.dataset.t))));
   fillPeople(); fillCustomers(); render();
 });
-$('#fFrom').addEventListener('change', (e) => { const d = fromInput(e.target.value); S.from = d == null ? M.X.lo : Math.max(M.X.lo, d); if (S.from > S.to) { S.to = S.from; $('#fTo').value = toInput(S.to); } quickDates(); render(); });
-$('#fTo').addEventListener('change', (e) => { const d = fromInput(e.target.value); S.to = d == null ? M.X.hi : Math.min(M.X.hi, d); if (S.to < S.from) { S.from = S.to; $('#fFrom').value = toInput(S.from); } quickDates(); render(); });
+$('#fFrom').addEventListener('change', (e) => { const d = fromInput(e.target.value); S.from = d == null ? M.X.lo : Math.max(M.XA.lo, d); if (S.from > S.to) { S.to = S.from; $('#fTo').value = toInput(S.to); } quickDates(); render(); });
+$('#fTo').addEventListener('change', (e) => { const d = fromInput(e.target.value); S.to = d == null ? M.X.hi : Math.min(M.XA.hi, d); if (S.to < S.from) { S.from = S.to; $('#fFrom').value = toInput(S.from); } quickDates(); render(); });
 $('#fWeekends').addEventListener('change', (e) => { S.weekends = e.target.checked; saveView(); render(); });
 $('#resetBtn').addEventListener('click', () => { Object.assign(S, dflt()); buildFilters(); render(); });
 
@@ -291,13 +297,13 @@ function filterRows() {
 function filters() {
   const days = [];
   for (let d = S.from; d <= S.to; d++) if (S.weekends || isWeekday(d)) days.push(d);
-  return { rows: new Set(filterRows()), days, cust: S.cust.size ? new Set(S.cust) : null };
+  return { rows: new Set(filterRows()), days, cust: S.cust.size ? new Set(S.cust) : null, from: S.from, to: S.to };
 }
 
 // ---------- tabs ----------
 function setTab(t) {
-  S.tab = TABS.includes(t) ? t : 'over';
-  document.querySelectorAll('.cc-tabs .tab').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === S.tab)));
+  S.tab = TABS.includes(t) && tabOn(t) ? t : TABS.find(tabOn);
+  document.querySelectorAll('.cc-tabs .tab').forEach((b) => { b.hidden = !tabOn(b.dataset.tab); b.setAttribute('aria-selected', String(b.dataset.tab === S.tab)); });
   document.querySelectorAll('.panel').forEach((p) => (p.hidden = p.id !== 'p-' + S.tab));
   saveView(); render();
 }
@@ -306,23 +312,23 @@ $('.cc-tabs').addEventListener('click', (e) => { const b = e.target.closest('.ta
 // ---------- tables ----------
 function cellHtml(c) {
   if (c.f === 's') return esc(c.v ?? '');
-  if (c.v == null || (c.f === 'n' && !c.v)) return c.f === 'p' ? '–' : '';
-  return c.f === 'p' ? fmtP(c.v) : fmtN(c.v);
+  if (c.v == null || (c.f === 'n' && !c.v)) return c.f === 'p' || c.f === 'q' || c.f === 't' ? '–' : '';
+  return c.f === 'p' ? fmtP(c.v) : c.f === 'q' ? fmtP(c.v, 1) : c.f === 't' ? fmtHM(c.v) : fmtN(c.v);
 }
 const emptyMsg = (t) => `<div class="empty-s">${t}</div>`;
 function renderTable(el, m) {
   if (!el) return;
   if (!m.rows.length || (m.n === 0)) { el.innerHTML = emptyMsg(m.empty || 'Nothing for these filters.'); return; }
   const th = m.cols.map((c) => `<th class="${c.cls || ''}">${c.h}</th>`).join('');
-  const body = m.rows.map((r) => `<tr class="${r.cls || ''}">${r.c.map((c, i) => `<td class="${[m.cols[i] && m.cols[i].cls, c.cls].filter(Boolean).join(' ')}"${c.title ? ` title="${esc(c.title)}"` : ''}>${cellHtml(c)}</td>`).join('')}</tr>`).join('');
+  const body = m.rows.map((r) => `<tr class="${r.cls || ''}"${r.sel != null ? ` data-sel="${esc(r.sel)}"` : ''}>${r.c.map((c, i) => `<td class="${[m.cols[i] && m.cols[i].cls, c.cls].filter(Boolean).join(' ')}"${c.title ? ` title="${esc(c.title)}"` : ''}>${cellHtml(c)}</td>`).join('')}</tr>`).join('');
   el.innerHTML = `<table class="${m.cls || ''}"><thead><tr>${th}</tr></thead><tbody>${body}</tbody></table>`;
 }
 
 // ---------- overview ----------
 function tile(label, value, sub) { return `<div class="ktile"><div class="eyebrow">${label}</div><div class="v">${value}</div><div class="d">${sub}</div></div>`; }
 function renderTiles(series) {
-  const t = series.reduce((a, x) => ({ act: a.act + x.act, clo: a.clo + x.clo, recv: a.recv + x.recv, worked: a.worked + x.worked }), { act: 0, clo: 0, recv: 0, worked: 0 });
-  const n = series.length, p = t.recv ? t.worked / t.recv : null;
+  const t = series.reduce((a, x) => ({ act: a.act + x.act, clo: a.clo + x.clo, recv: a.recv + x.recv, precv: a.precv + x.precv, worked: a.worked + x.worked }), { act: 0, clo: 0, recv: 0, precv: 0, worked: 0 });
+  const n = series.length, p = t.precv ? t.worked / t.precv : null;
   const pill = p == null ? 'no customer emails in these filters' : `<span class="pill ${p >= GOAL ? 'ok' : 'bad'}">${p >= GOAL ? 'meets' : 'below'} the 85% goal</span>`;
   $('#tiles').innerHTML =
     tile('Cases actioned', fmtN(t.act), n ? `${fmtN(t.act / n)} per day · emails sent on the cases` : '') +
@@ -376,7 +382,7 @@ function dailyChart(el, series) {
     const r = svg.getBoundingClientRect(), i = Math.max(0, Math.min(n - 1, Math.floor(((ev.clientX - r.left) * (W / r.width) - m.l) / bw))), x = series[i];
     groups.forEach((gEl, j) => gEl.setAttribute('opacity', j === i ? 1 : 0.45));
     showTip(`<div class="tt">${DOW[dowOf(x.d)]} ${dLong(x.d)}</div>` + tipRow('Cases actioned', fmtN(x.act), c.s1) + tipRow('Cases closed', fmtN(x.clo), c.s3) +
-      tipRow('Actioned + closed', fmtN(x.act + x.clo)) + tipRow('Customer emails', fmtN(x.recv), c.s2) + tipRow('% actioned', fmtP(x.recv ? x.worked / x.recv : null)), ev);
+      tipRow('Actioned + closed', fmtN(x.act + x.clo)) + tipRow('Customer emails', fmtN(x.recv), c.s2) + tipRow('% actioned', fmtP(x.precv ? x.worked / x.precv : null)), ev);
   });
   hit.addEventListener('mouseleave', () => { groups.forEach((gEl, j) => gEl.setAttribute('opacity', isWeekday(series[j].d) ? 1 : 0.55)); hideTip(); });
 }
@@ -406,6 +412,44 @@ function renderCust(F) {
   renderTable($('#mCust'), custModel(M, L, F));
 }
 
+// ---------- SLA (response time) ----------
+const SLA_G = ['owner', 'week', 'day', 'company', 'parent', 'segment', 'status'];
+function renderSla(F) {
+  const G = slaGroups(M, L);
+  if (!$('#slaBy').options.length) $('#slaBy').innerHTML = SLA_G.map((k) => `<option value="${k}">${esc(G[k].name)}</option>`).join('');
+  $('#slaBy').value = S.slaBy;
+  const rows = slaRows(M, L, F), s = slaStats(rows), pct = (n) => (s.n ? fmtP(n / s.n, 1) : '–');
+  $('#slaTiles').innerHTML =
+    tile('SLA cases', fmtN(s.n), 'opened in the dates shown') +
+    tile('SLA met', fmtN(s.m.n), `${pct(s.m.n)} of cases · avg ${fmtHM(slaAvg(s.m)) || '–'}`) +
+    tile('SLA breached', fmtN(s.b.n), `${pct(s.b.n)} of cases · avg ${fmtHM(slaAvg(s.b)) || '–'}`) +
+    tile('Avg elapsed time', fmtHM(slaAvg(s)) || '–', 'first response, all cases shown');
+  const off = slaOffRows(M, L, F);
+  $('#slaNote').textContent = `Cases count on the day they were opened, weekends included. Elapsed time is the time to first response, as in the SLA Dashboard.` +
+    (off ? ` ${plural(off, 'case')} owned by people with no row (queues, supervisors) aren't counted; they're on the Names & sources tab.` : '') +
+    (M.XS.lo < S.from || M.XS.hi > S.to ? ` The SLA export covers ${span(M.XS.lo, M.XS.hi)}; widen the dates to see more.` : '');
+  renderTable($('#tSla'), slaModel(M, L, rows, S.slaBy, S.slaSel));
+  let pick = slaPick(M, L, rows, S.slaBy, S.slaSel);
+  if (S.slaRes !== '') pick = pick.filter((r) => String(r[7]) === S.slaRes);
+  const cm = slaCasesModel(M, pick, S.slaLimit);
+  renderTable($('#tSlaCases'), cm);
+  const selLabel = S.slaSel != null ? $(`#tSla tr[data-sel="${CSS.escape(S.slaSel)}"] td`)?.textContent : null;
+  $('#slaCasesSub').innerHTML = (cm.total ? `showing ${fmtN(Math.min(cm.total, S.slaLimit))} of ${plural(cm.total, 'case')}, newest first` : '') +
+    (selLabel ? ` · <b>${esc(selLabel)}</b> <button class="cc-linkbtn" type="button" id="slaClear">show all</button>` : '');
+  $('#slaMoreWrap').hidden = cm.total <= S.slaLimit;
+  document.querySelectorAll('#slaRes button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.r === S.slaRes)));
+}
+$('#slaBy').addEventListener('change', (e) => { S.slaBy = e.target.value; S.slaSel = null; S.slaLimit = 200; render(); });
+$('#tSla').addEventListener('click', (e) => {
+  const tr = e.target.closest('tr[data-sel]'); if (!tr) return;
+  S.slaSel = S.slaSel === tr.dataset.sel ? null : tr.dataset.sel; S.slaLimit = 200; render();
+});
+$('#p-sla').addEventListener('click', (e) => {
+  if (e.target.closest('#slaClear')) { S.slaSel = null; S.slaLimit = 200; render(); }
+  const r = e.target.closest('#slaRes button'); if (r) { S.slaRes = r.dataset.r; S.slaLimit = 200; render(); }
+  if (e.target.closest('#slaMore')) { S.slaLimit += 200; render(); }
+});
+
 // ---------- names & sources ----------
 function renderNames() {
   const opts = (p) => `<option value="-1">(none)</option>` + M.D.people.map((n, i) => [n, i]).sort((a, b) => byText(a[0], b[0])).map(([n, i]) => `<option value="${i}"${i === p ? ' selected' : ''}>${esc(n)}</option>`).join('');
@@ -417,15 +461,16 @@ function renderNames() {
   $('#tCustMap').innerHTML = L.cust.length ? `<table><thead><tr><th>Rep</th><th>Customer row</th><th>Salesforce companies counted</th></tr></thead><tbody>` +
     L.cust.flatMap((b) => b.customers.map((c) => `<tr><td>${esc(b.label)}</td><td>${esc(c.label)}</td><td class="${c.comps.length ? '' : 'low'}" style="white-space:normal;text-align:left">${c.comps.length ? esc(c.comps.map((x) => M.D.companies[x]).join(' · ')) : 'none matched'}</td></tr>`)).join('') + '</tbody></table>' : emptyMsg('No customer rows.');
   const un = unlisted(M, L);
-  $('#tUnlisted').innerHTML = un.length ? `<table><thead><tr><th>Case owner</th><th>Team folder</th><th style="text-align:right">Actioned + closed</th></tr></thead><tbody>` +
-    un.map((x) => `<tr><td>${esc(x.name)}</td><td>${esc(x.team)}</td><td style="text-align:right">${fmtN(x.n)}</td></tr>`).join('') + '</tbody></table>' : emptyMsg('Everyone in the exports has a row.');
+  const sl = M.has.sla;
+  $('#tUnlisted').innerHTML = un.length ? `<table><thead><tr><th>Case owner</th><th>Team folder</th><th style="text-align:right">Actioned + closed</th>${sl ? '<th style="text-align:right">SLA cases</th>' : ''}</tr></thead><tbody>` +
+    un.map((x) => `<tr><td>${esc(x.name)}</td><td>${esc(x.team)}</td><td style="text-align:right">${fmtN(x.n)}</td>${sl ? `<td style="text-align:right">${fmtN(x.sla)}</td>` : ''}</tr>`).join('') + '</tbody></table>' : emptyMsg('Everyone in the exports has a row.');
   about();
 }
 $('#p-names').addEventListener('change', (e) => {
   const s = e.target.closest('select[data-key]'); if (!s) return;
   OVR.set(s.dataset.key, +s.value); L = buildLayout(M, OVR); fillPeople(); fillCustomers(); renderNames();
 });
-const KIND = { sent: 'Emails sent (cases actioned)', received: 'Emails received', closed: 'Cases closed', history: 'Case history (cases closed)', workbook: 'Workbook layout' };
+const KIND = { sent: 'Emails sent (cases actioned)', received: 'Emails received', closed: 'Cases closed', history: 'Case history (cases closed)', sla: 'SLA (response time)', workbook: 'Workbook layout' };
 function about() {
   $('#about').innerHTML = `<h2>How the numbers are calculated</h2>
     <ul>
@@ -433,6 +478,8 @@ function about() {
       <li><b>CASES CLOSED</b>: from the Case History report when it is loaded (Status changed to a Closed status). A case counts on the day it was closed, for its owner, unless it was closed again within 24 hours (it had reopened); then only the later close counts. That matches the workbook, which was filled in from a report pulled the next day. Without Case History, the Closed Cases per Agent report is used; it only lists cases that are still closed now, so closures that later reopened are missing and it runs low.</li>
       <li><b>TOTAL</b> columns add up each Monday-to-Friday week; <b>TOTALS</b> rows add up everyone shown.</li>
       <li><b>CUST E-MAILS</b>: each customer row counts every email received for the Salesforce companies matched to it (listed above), whoever owns the case. <b>E-MAILS FROM CEVA STATIONS</b> are emails from @cevalogistics.com addresses on the rep's cases. <b>TOTAL</b> = customer rows + CEVA stations. <b>E-MAILS ACTIONED</b> = the rep's cases actioned + cases closed. <b>% ACTIONED</b> = E-MAILS ACTIONED ÷ TOTAL, goal 85%. A mailbox block (a name with dates beside it) counts every email received for that company, against its rep's actioned + closed.</li>
+      <li><b>SLA</b>: from the SLA export, one row per case, counted on the day it was opened (weekends included). SLA Met or Breached comes from its "SLA Breached?" column (else Violation, else Elapsed vs Target), and cases with a blank SLA are left out, as in the SLA Dashboard. Averages are of Elapsed Time (Mins), shown as hours and minutes.</li>
+      <li>Emails received on a case that no loaded report names an owner for (the full received report has no Case Owner column) show under <b>No case owner</b> for their team, and stay out of % actioned.</li>
       <li>Every figure is recalculated from the exports, so each cell uses the right day and the right person.</li>
       <li>Weekends are left out unless "Include weekends" is ticked. Ship counts (the WK SHIP CT columns) aren't in these exports and aren't shown.</li>
     </ul>`;
@@ -456,12 +503,13 @@ function render() {
   hideTip();
   const F = filters();
   const secs = [...S.secs], who = S.people.size ? plural(F.rows.size, 'person').replace('persons', 'people') : secs.length === L.sections.length ? (L.fromBook ? 'everyone' : 'all teams') : secs.join(' / ');
-  $('#eyebrow').textContent = `Actioned & closed case count · ${who}${F.cust ? ` · ${plural(F.cust.size, 'customer')}` : ''}`;
-  $('#range').innerHTML = `<b>${esc(span(S.from, S.to))}</b> · ${plural(F.days.length, S.weekends ? 'day' : 'weekday')}`;
   const t = S.tab;
+  $('#eyebrow').textContent = `${t === 'sla' ? 'SLA response time' : 'Actioned & closed case count'} · ${who}${F.cust && t !== 'sla' ? ` · ${plural(F.cust.size, 'customer')}` : ''}`;
+  $('#range').innerHTML = `<b>${esc(span(S.from, S.to))}</b>` + (t === 'sla' ? ' · every day' : ` · ${plural(F.days.length, S.weekends ? 'day' : 'weekday')}`);
   if (t === 'over') { const series = daily(M, L, F); renderTiles(series); dailyChart($('#cDaily'), series); renderTable($('#tPerson'), summaryModel(M, L, F)); renderTop(F); }
   else if (t === 'cases') renderCases(F);
   else if (t === 'cust') renderCust(F);
+  else if (t === 'sla') renderSla(F);
   else if (t === 'names') renderNames();
 }
 let rz = 0;
@@ -506,7 +554,8 @@ function loadXlsx() {
 function xCell(c) {
   if (c.f === 's') return c.v ?? '';
   if (c.v == null || (c.f === 'n' && !c.v)) return '';
-  return c.f === 'p' ? { t: 'n', v: c.v, z: '0%' } : { t: 'n', v: c.v, z: '#,##0' };
+  if (c.f === 't') return fmtHM(c.v);
+  return c.f === 'p' ? { t: 'n', v: c.v, z: '0%' } : c.f === 'q' ? { t: 'n', v: c.v, z: '0.0%' } : { t: 'n', v: c.v, z: '#,##0' };
 }
 const xDate = (d) => ({ t: 'n', v: d + 25569, z: 'm/d' });
 const dowRow = (m) => ['', ...m.cols.slice(1).map((c) => (c.d != null ? DOW[dowOf(c.d)].toUpperCase() : ''))];
@@ -563,19 +612,28 @@ async function exportExcel() {
   try {
     const XLSX = await loadXlsx(), wb = XLSX.utils.book_new(), F = filters();
     const add = (name, sh, widths) => XLSX.utils.book_append_sheet(wb, sh.build(XLSX, widths), name.slice(0, 31));
-    const cases = xSheet();
-    for (const s of L.sections) {
-      if (!s.rows.some((r) => F.rows.has(r.key))) continue;
-      cases.title(s.name);
-      for (const i of [0, 1]) { cases.model(casesModel(M, s, i, F), i ? 'CASES CLOSED' : 'CASES ACTIONED', true); cases.push([]); }
-      cases.push([]);
-    }
     const k = monthKey(S.to), one = monthKey(S.from) === k;
-    add(one ? `${SHEET_MON[k % 12]} ${Math.floor(k / 12)}` : 'CASES', cases, [{ wch: 18 }, { wch: 8 }]);
-    const cust = xSheet(); cust.model(custModel(M, L, F), 'CUSTOMER / REP', false);
-    add(`CUST E-MAILS${one ? ' ' + SHEET_MON[k % 12] : ''}`, cust, [{ wch: 30 }, { wch: 8 }]);
+    if (M.has.act || M.has.clo) {
+      const cases = xSheet();
+      for (const s of L.sections) {
+        if (!s.rows.some((r) => F.rows.has(r.key))) continue;
+        cases.title(s.name);
+        for (const i of [0, 1]) { cases.model(casesModel(M, s, i, F), i ? 'CASES CLOSED' : 'CASES ACTIONED', true); cases.push([]); }
+        cases.push([]);
+      }
+      add(one ? `${SHEET_MON[k % 12]} ${Math.floor(k / 12)}` : 'CASES', cases, [{ wch: 18 }, { wch: 8 }]);
+    }
+    if (L.cust.length) { const cust = xSheet(); cust.model(custModel(M, L, F), 'CUSTOMER / REP', false); add(`CUST E-MAILS${one ? ' ' + SHEET_MON[k % 12] : ''}`, cust, [{ wch: 30 }, { wch: 8 }]); }
     const per = xSheet(); per.model(summaryModel(M, L, F), null, false);
     add('BY PERSON', per, [{ wch: 24 }, { wch: 15 }, { wch: 13 }, { wch: 17 }, { wch: 16 }, { wch: 12 }]);
+    if (M.has.sla) {
+      // The SLA table grouped as on the page, and every SLA case in the filters
+      const rows = slaRows(M, L, F), sum = xSheet();
+      sum.model(slaModel(M, L, rows, S.slaBy, null), null, false);
+      add('SLA', sum, [{ wch: 28 }, { wch: 12 }]);
+      const list = xSheet(); list.model(slaCasesModel(M, rows, Infinity), null, false);
+      add('SLA CASES', list, [{ wch: 11 }, { wch: 18 }, { wch: 18 }, { wch: 20 }, { wch: 28 }, { wch: 40 }, { wch: 18 }, { wch: 12 }, { wch: 9 }]);
+    }
     const pad = (n) => String(n).padStart(2, '0'), d = new Date();
     XLSX.writeFile(wb, `ACTIONED & CLOSED CASE COUNT ${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}.xlsx`);
   } catch (err) {

@@ -6,6 +6,7 @@
 //   received Email Message Date, statuses Read / New / Replied                 -> customer emails
 //            (the "from CEVA" variant is a subset of the full one; overlapping emails count once)
 //   closed   Date/Time Closed                                                  -> cases closed
+//   sla      Date/Time Opened + Elapsed Time (Mins) / SLA Breached?            -> SLA (response time)
 // Salesforce ".xls" exports are HTML tables; real .xlsx/.xls/.csv files are read with SheetJS.
 // The ACTIONED & CLOSED CASE COUNT workbook, if it is among the files, supplies the layout to mirror.
 'use strict';
@@ -205,9 +206,10 @@ function minuteOf(v) {
 }
 const isCevaMail = (s) => /@([\w-]+\.)*cevalogistics\.com\s*$/i.test(String(s || ''));
 
-// "UScorporate-cs" -> "US Corporate CS", "CSG-USEAST" -> "US East", "Legacy" -> "Legacy"
+// "UScorporate-cs" -> "US Corporate CS", "CSG-USEAST" -> "US East", "Legacy" -> "Legacy", "EAST 10-9" -> "East"
+// (a date at the end of a folder name is dropped, so this week's and last week's folders are one team)
 function teamLabel(s) {
-  let t = norm(String(s).replace(/^CSG[-_ ]*/i, '').replace(/[_-]+/g, ' '));
+  let t = norm(String(s).replace(/^CSG[-_ ]*/i, '').replace(/[\s_-]+\d{1,4}([-/._]\d{1,4}){1,2}$/, '').replace(/[_-]+/g, ' '));
   t = t.replace(/^us(?=[a-z])/i, 'US ');
   return t.split(' ').map((w) => (w.length <= 2 ? w.toUpperCase() : w[0].toUpperCase() + w.slice(1).toLowerCase())).join(' ');
 }
@@ -217,7 +219,17 @@ function niceName(s) {
   return n && n === n.toLowerCase() ? n.replace(/(^|[\s.'-])([a-z])/g, (m, a, b) => a + b.toUpperCase()) : n;
 }
 
+// "CSG-USCENTRAL" -> "Central", "CSG-USCORPORATE-LEGACY" -> "Legacy" (as team folders are usually named)
+function branchTeam(code) {
+  const s = norm(code).replace(/^CSG[-_ ]*/i, '').split(/[-_]/).pop().replace(/^US(?=[A-Z]{3,})/i, '');
+  return s ? teamLabel(s) : null;
+}
+const numOf = (v) => { if (v == null || v === '') return null; const n = typeof v === 'number' ? v : parseFloat(String(v).replace(/,/g, '')); return isFinite(n) ? n : null; };
+const boolOf = (v) => { const s = norm(v).toLowerCase(); return s === '' ? null : s === '1' || s === 'true' || s === 'yes'; };
+
 function kindOf(h, rows) {
+  // The SLA export also has Date/Time Closed, so it is recognised first
+  if (h.has('date/time opened') && (h.has('elapsed time (mins)') || h.has('sla breached?'))) return 'sla';
   if (h.has('edited by') && h.has('edit date') && h.has('new value')) return 'history';
   if (h.has('date/time closed') && h.has('case owner')) return 'closed';
   if (h.has('email message date')) {
@@ -236,7 +248,7 @@ function kindOf(h, rows) {
 // cases they share with files whose team is known, then from the sender on a sent-emails report
 // ("CEVA Ground USEAST" -> East, "CEVA Ground USCORPORATE-LEGACY" -> Legacy), then shared cases again.
 function teamsFromContents(files) {
-  const loose = () => files.filter((f) => !f.team && f.kind && f.kind !== 'workbook' && f.kind !== 'history');   // case history covers every team
+  const loose = () => files.filter((f) => !f.team && f.kind && f.kind !== 'workbook' && f.kind !== 'history' && f.senders);   // case history covers every team
   const byCases = () => {
     const caseTeam = new Map();
     for (const f of files) if (f.team && f.cases) for (const cn of f.cases) if (!caseTeam.has(cn)) caseTeam.set(cn, f.team);
@@ -264,9 +276,10 @@ async function build(items) {
   // Phase 1: read every file and keep only the fields we need, keyed so overlapping exports count once.
   // Within one file a key can repeat (two emails in the same minute); across files the larger count wins,
   // and a case owner known from either copy is kept.
-  const K = { sent: new Map(), received: new Map(), closed: new Map(), history: new Map() };
+  const K = { sent: new Map(), received: new Map(), closed: new Map(), history: new Map(), sla: new Map() };
   const merge = (kind, local) => {
     const g = K[kind];
+    if (kind === 'sla') { for (const [k, v] of local) g.set(k, v); return; }   // one row per case: the last file read wins
     for (const [k, v] of local) {
       const o = g.get(k);
       if (!o) { g.set(k, v); continue; }
@@ -305,7 +318,7 @@ async function build(items) {
     const col = (r, c) => (H.has(c) ? r[H.get(c)] : '');
     const local = new Map(), add = (key, rec) => { const o = local.get(key); if (o) o.n++; else local.set(key, { ...rec, n: 1 }); };
     const span = (d) => { if (d == null) return; if (info.from == null || d < info.from) info.from = d; if (info.to == null || d > info.to) info.to = d; };
-    info.cases = new Set(); info.senders = new Map();   // for finding the team of a file picked on its own
+    info.cases = new Set(); info.senders = new Map(); info.branches = new Set();   // for finding the team of a file picked on its own
     for (const r of body) {
       const cn = norm(col(r, 'case number')), owner = norm(col(r, 'case owner'));
       info.cases.add(cn);
@@ -317,6 +330,23 @@ async function build(items) {
         const key = [cn, norm(col(r, 'email message date')), norm(col(r, 'from name')), norm(col(r, 'email subject'))].join('\u0001');
         if (kind === 'sent') add(key, { owner, cn, day, folder: info.team, fi: files.length - 1 });
         else add(key, { owner, cn, day, folder: info.team, fi: files.length - 1, company: norm(col(r, 'company name')), ceva: isCevaMail(col(r, 'web email')) });
+      } else if (kind === 'sla') {
+        // Same rules as the SLA Dashboard: rows without a Date/Time Opened are skipped, SLA Met/Breached comes
+        // from "SLA Breached?" (else Violation, else Elapsed vs Target), and a blank SLA is left out.
+        const at = minuteOf(col(r, 'date/time opened')); if (at == null) continue;
+        const elapsed = numOf(col(r, 'elapsed time (mins)')), target = numOf(col(r, 'target response (mins)'));
+        let res = norm(col(r, 'sla breached?'));
+        if (!res && !H.has('sla breached?')) {
+          const viol = boolOf(col(r, 'violation'));
+          if (viol != null) res = viol ? 'Breached' : 'Met'; else if (elapsed != null && target != null) res = elapsed > target ? 'Breached' : 'Met';
+        }
+        if (!res) { info.blankSla = (info.blankSla || 0) + 1; continue; }
+        span(Math.floor(at / 1440));
+        const branch = norm(col(r, 'branch code')); if (branch) info.branches.add(branch);
+        const wk = numOf(col(r, 'creation week'));
+        local.set(cn, { owner, cn, at, day: Math.floor(at / 1440), closedAt: minuteOf(col(r, 'date/time closed')), elapsed, target,
+          met: /breach/i.test(res) ? 0 : 1, status: norm(col(r, 'status')), segment: norm(col(r, 'customer segment')), parent: norm(col(r, 'ultimate parent')),
+          company: norm(col(r, 'company name')), subject: norm(col(r, 'subject')), week: wk == null ? null : Math.round(wk), branch, folder: info.team, fi: files.length - 1, n: 1 });
       } else if (kind === 'history') {
         // a status change into a Closed status from an open one (Closed-Resolved -> Closed-No Action Needed is not a new close)
         if (!/^closed/i.test(norm(col(r, 'new value'))) || /^closed/i.test(norm(col(r, 'old value')))) continue;
@@ -330,10 +360,21 @@ async function build(items) {
       }
     }
     info.rows = body.length;
+    // An SLA export that covers one branch belongs to that team (unless it sits in a team folder); one that
+    // covers several branches gives each case its own branch's team.
+    if (kind === 'sla') {
+      if (info.branches.size === 1 && !info.team) info.team = branchTeam([...info.branches][0]);
+      if (info.branches.size > 1) for (const v of local.values()) v.folder = branchTeam(v.branch) || info.team;
+      delete info.senders;
+    }
     merge(kind, local);
     progress({ file: path || name, pct: 100, rows: info.rows, kind });
   }
-  if (!files.some((f) => f.kind && f.kind !== 'workbook')) throw new Error('None of these files look like Salesforce case or email reports. Choose the Cview Report folder, or the .xls exports in its team folders.');
+  if (!files.some((f) => f.kind && f.kind !== 'workbook')) {
+    throw new Error(template
+      ? 'Only the ACTIONED & CLOSED CASE COUNT workbook was found. It gives the layout, but the numbers come from the Salesforce exports: add at least one report (or the folder that holds them).'
+      : 'None of these files look like Salesforce case, email or SLA reports. Choose the Cview Report folder, or the .xls exports in its team folders.');
+  }
   // With a Case History export, CASES CLOSED is counted the way the workbook was filled in, from a report
   // pulled the next day: a case counts on the day it was closed, for its owner, unless it was closed again
   // within 24 hours (it had reopened), in which case only that later close counts. The Closed Cases per
@@ -354,7 +395,7 @@ async function build(items) {
     K.closed = kept;
   }
   teamsFromContents(files);
-  for (const kind of ['sent', 'closed', 'received']) for (const v of K[kind].values()) if (!v.folder && v.fi != null) v.folder = files[v.fi].team;
+  for (const kind of ['sent', 'closed', 'received', 'sla']) for (const v of K[kind].values()) if (!v.folder && v.fi != null) v.folder = files[v.fi].team;
   // Closures from Case History take the team of the case in the other reports.
   if (K.history.size) {
     const caseTeam = new Map();
@@ -362,16 +403,18 @@ async function build(items) {
     // A history export run for all cases also holds other countries' teams: keep a closure only when its case is in
     // the team reports or its owner is someone in them.
     const known = new Set();
-    for (const kind of ['sent', 'received']) for (const v of K[kind].values()) if (v.owner) known.add(v.owner.toLowerCase());
+    for (const kind of ['sent', 'received', 'sla']) for (const v of K[kind].values()) if (v.owner) known.add(v.owner.toLowerCase());
+    // Loaded on its own (no team reports to compare with), every closure is kept.
+    const alone = !files.some((f) => f.kind && f.kind !== 'workbook' && f.kind !== 'history');
     for (const [k, v] of K.closed) {
       if (!v.folder) v.folder = caseTeam.get(v.cn) || null;
-      if (!v.folder && !known.has((v.owner || '').toLowerCase())) K.closed.delete(k);
+      if (!alone && !v.folder && !known.has((v.owner || '').toLowerCase())) K.closed.delete(k);
     }
   }
 
   // Phase 2: who owns each case, and which team folder each person belongs to.
   const caseOwner = new Map();
-  for (const kind of ['closed', 'sent', 'received']) for (const v of K[kind].values()) if (v.cn && v.owner && !caseOwner.has(v.cn)) caseOwner.set(v.cn, v.owner);
+  for (const kind of ['closed', 'sent', 'received', 'sla']) for (const v of K[kind].values()) if (v.cn && v.owner && !caseOwner.has(v.cn)) caseOwner.set(v.cn, v.owner);
   const pKey = (s) => norm(s).toLowerCase();
   const people = new Map();   // key -> { name, votes: Map(team -> n) }
   const person = (raw, team, n) => {
@@ -382,8 +425,11 @@ async function build(items) {
     if (team) p.votes.set(team, (p.votes.get(team) || 0) + n);
     return k;
   };
-  const ownerOf = (v) => v.owner || (v.cn ? caseOwner.get(v.cn) || '' : '');
-  for (const kind of ['sent', 'closed', 'received']) for (const v of K[kind].values()) v.pk = person(ownerOf(v), v.folder, v.n);
+  // Emails received on a case no loaded report names an owner for (the full received report has no Case Owner
+  // column) stay with their team as "No case owner (East)", so that report still shows on its own.
+  const ownerOf = (v, kind) => v.owner || (v.cn ? caseOwner.get(v.cn) || '' : '') ||
+    (kind === 'received' ? `No case owner (${v.folder || (v.fi != null && files[v.fi].team) || 'no team'})` : '');
+  for (const kind of ['sent', 'closed', 'received', 'sla']) for (const v of K[kind].values()) v.pk = person(ownerOf(v, kind), v.folder, v.n);
   const home = new Map();
   for (const [k, p] of people) {
     let best = null, bn = -1;
@@ -398,7 +444,7 @@ async function build(items) {
   const comps = [], cIdx = new Map(), C = (c) => { c = c || '(no company)'; if (!cIdx.has(c)) { cIdx.set(c, comps.length); comps.push(c); } return cIdx.get(c); };
   // A file picked on its own (no team folder in its path) takes the team most of its case owners belong to.
   const fileVotes = files.map(() => new Map());
-  for (const kind of ['sent', 'closed', 'received']) for (const v of K[kind].values()) if (v.pk && v.fi != null) { const m = fileVotes[v.fi], h = home.get(v.pk); m.set(h, (m.get(h) || 0) + v.n); }
+  for (const kind of ['sent', 'closed', 'received', 'sla']) for (const v of K[kind].values()) if (v.pk && v.fi != null) { const m = fileVotes[v.fi], h = home.get(v.pk); m.set(h, (m.get(h) || 0) + v.n); }
   files.forEach((f, i) => { if (!f.team && f.kind && f.kind !== 'workbook' && f.kind !== 'history') { const best = [...fileVotes[i]].sort((a, b) => b[1] - a[1])[0]; if (best) f.team = best[0]; } });
   const teamFor = (v) => T(v.pk ? home.get(v.pk) : v.folder || (v.fi != null && files[v.fi].team) || null);
   const tally = (map, key, n) => map.set(key, (map.get(key) || 0) + n);
@@ -407,10 +453,14 @@ async function build(items) {
   for (const v of K.closed.values()) tally(clo, [teamFor(v), P(v.pk), v.day].join(), v.n);
   for (const v of K.received.values()) tally(inb, [teamFor(v), P(v.pk), C(v.company), v.day, v.ceva ? 1 : 0].join(), v.n);
   const flat = (m) => [...m].map(([k, n]) => [...k.split(',').map(Number), n]);
+  // SLA cases, one row each. Their text fields share one list of strings (kept apart from the email
+  // companies, so loading the SLA export doesn't change how customer rows are matched).
+  const strs = [], sIdx = new Map(), Z = (s) => { s = s || ''; if (!sIdx.has(s)) { sIdx.set(s, strs.length); strs.push(s); } return sIdx.get(s); };
+  const sla = [...K.sla.values()].map((v) => [teamFor(v), P(v.pk), Z(v.company), v.at, v.closedAt, v.elapsed, v.target, v.met, Z(v.status), Z(v.segment), Z(v.parent), v.cn, Z(v.subject), v.week]);
   return {
     teams, people: names.map((k) => people.get(k).name), companies: comps,
-    act: flat(act), clo: flat(clo), inb: flat(inb),
-    files: files.map((f) => ({ name: f.path, team: f.team, kind: f.kind, rows: f.rows, from: f.from, to: f.to, note: f.note })),
+    act: flat(act), clo: flat(clo), inb: flat(inb), sla, strs,
+    files: files.map((f) => ({ name: f.path, team: f.team, kind: f.kind, rows: f.rows, from: f.from, to: f.to, note: f.note || (f.blankSla ? `${f.blankSla} rows with a blank SLA left out` : '') })),
     template,
   };
 }

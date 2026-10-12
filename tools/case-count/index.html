@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Case Count · Joshua Nguyen</title>
-<meta name="description" content="Cases actioned and closed and customer emails by person, filled from your Salesforce report exports like the ACTIONED &amp; CLOSED CASE COUNT workbook. Files stay on your computer.">
+<meta name="description" content="Cases actioned and closed, customer emails and SLA response time by person, filled from your Salesforce report exports like the ACTIONED &amp; CLOSED CASE COUNT workbook. Files stay on your computer.">
 <!-- Shared bus: absolute paths. This tool's own files: relative paths. -->
 <link rel="stylesheet" href="/assets/bus.css">
 <script src="/assets/core/theme.js"></script>
@@ -18,7 +18,7 @@
   <section class="hero cc-start" id="start">
     <div class="eyebrow">Upload your reports</div>
     <h1>Case Count</h1>
-    <p>Your ACTIONED &amp; CLOSED CASE COUNT numbers, filled from the Salesforce exports. Add the folders or files you need (East, Legacy, …, the Case History export and the workbook), then load them together.</p>
+    <p>Your ACTIONED &amp; CLOSED CASE COUNT numbers and SLA response times, filled from the Salesforce exports. Add the folders or files you need (East, Legacy, Central, …, the SLA and Case History exports and the workbook) and load them together, or load a single report on its own.</p>
     <div class="actions" id="pickRow">
       <label class="btn" for="folderInput">Choose a folder</label>
       <label class="btn cc-btn-alt" for="filesInput">Choose files</label>
@@ -95,6 +95,7 @@
       <button class="tab" role="tab" type="button" data-tab="over">Overview</button>
       <button class="tab" role="tab" type="button" data-tab="cases">Cases actioned &amp; closed</button>
       <button class="tab" role="tab" type="button" data-tab="cust">Customer emails</button>
+      <button class="tab" role="tab" type="button" data-tab="sla">SLA</button>
       <button class="tab" role="tab" type="button" data-tab="names">Names &amp; sources</button>
     </nav>
 
@@ -126,6 +127,23 @@
       </div>
     </section>
 
+    <!-- SLA (response time), from the SLA export: the SLA Dashboard's view, with this page's filters -->
+    <section class="panel" id="p-sla" role="tabpanel" hidden>
+      <div class="tiles-k" id="slaTiles"></div>
+      <p class="note" id="slaNote"></p>
+      <div class="card">
+        <div class="card-h"><h2>SLA by</h2><select id="slaBy" aria-label="Group the SLA table by"></select><span class="sub">click a row to list its cases</span><button class="cc-linkbtn copybtn" type="button" data-copy="#tSla" title="Copy this table, then paste into Excel">Copy</button></div>
+        <div class="tscroll tall" id="tSla"></div>
+      </div>
+      <div class="card">
+        <div class="card-h"><h2>Cases</h2><span class="sub" id="slaCasesSub"></span>
+          <div class="seg" id="slaRes" role="group" aria-label="SLA result"><button type="button" data-r="">All</button><button type="button" data-r="1">Met</button><button type="button" data-r="0">Breached</button></div>
+          <button class="cc-linkbtn copybtn" type="button" data-copy="#tSlaCases" title="Copy this table, then paste into Excel">Copy</button></div>
+        <div class="tscroll tall" id="tSlaCases"></div>
+        <div class="sla-more" id="slaMoreWrap" hidden><button class="cc-btn" id="slaMore" type="button">Show 200 more</button></div>
+      </div>
+    </section>
+
     <section class="panel" id="p-names" role="tabpanel" hidden>
       <div class="card">
         <div class="card-h"><h2>Names</h2><span class="sub">workbook name → Salesforce case owner</span></div>
@@ -137,7 +155,7 @@
         <div class="tscroll" id="tCustMap"></div>
       </div>
       <div class="card">
-        <div class="card-h"><h2>Not on the workbook</h2><span class="sub">case owners in the exports with no row (queues, supervisors, other teams); their numbers aren't counted</span></div>
+        <div class="card-h"><h2>Not on the workbook</h2><span class="sub">case owners in the exports with no row (queues, supervisors); their numbers aren't counted. A team with nobody on the workbook gets its own section instead.</span></div>
         <div class="tscroll" id="tUnlisted"></div>
       </div>
       <div class="card about" id="about"></div>

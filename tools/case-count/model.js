@@ -3,6 +3,9 @@
 //   act [team, person, day, n]                   emails sent on the person's cases (CASES ACTIONED)
 //   clo [team, person, day, n]                   cases closed (CASES CLOSED)
 //   inb [team, person, company, day, ceva, n]    emails received; ceva 1 = from a CEVA address
+//   sla [team, person, company, opened, closed, elapsed, target, met, status, segment, parent, case, subject, week]
+//                                                one row per case in the SLA export; opened/closed are minutes since
+//                                                1970-01-01, elapsed/target minutes, met 1/0, text fields index strs[]
 // person -1 = no known case owner; days are whole days since 1970-01-01.
 export const GOAL = 0.85;
 
@@ -27,11 +30,21 @@ export const byText = (a, b) => String(a).localeCompare(String(b), 'en', { sensi
 // ---------- indexes ----------
 // I.pday: person -> day -> [actioned, closed, received from CEVA on their cases, received on their cases]
 // I.comp: company -> day -> received (any owner); I.compOwn: "person,company" -> day -> received not from CEVA
+// X: the days the case-count reports cover; XS: the days SLA cases were opened; XA: both. Only the reports
+// that were loaded count, so a single file still gives a dashboard.
+export const slaDay = (r) => Math.floor(r[3] / 1440);
 export function prepare(D) {
+  D.sla = D.sla || []; D.strs = D.strs || [];
   let lo = Infinity, hi = -Infinity;
   for (const r of D.act) { lo = Math.min(lo, r[2]); hi = Math.max(hi, r[2]); }
   for (const r of D.clo) { lo = Math.min(lo, r[2]); hi = Math.max(hi, r[2]); }
   for (const r of D.inb) { lo = Math.min(lo, r[3]); hi = Math.max(hi, r[3]); }
+  let slo = Infinity, shi = -Infinity;
+  for (const r of D.sla) { const d = slaDay(r); slo = Math.min(slo, d); shi = Math.max(shi, d); }
+  const has = { act: D.act.length > 0, clo: D.clo.length > 0, inb: D.inb.length > 0, sla: D.sla.length > 0 };
+  has.cc = has.act || has.clo || has.inb;
+  if (!has.cc) { lo = slo; hi = shi; }
+  if (!has.sla) { slo = lo; shi = hi; }
   const pday = new Map(), comp = new Map(), compOwn = new Map();
   const slot = (p, d) => { let m = pday.get(p); if (!m) pday.set(p, (m = new Map())); let v = m.get(d); if (!v) m.set(d, (v = [0, 0, 0, 0])); return v; };
   for (const r of D.act) if (r[1] >= 0) slot(r[1], r[2])[0] += r[3];
@@ -47,8 +60,11 @@ export function prepare(D) {
   for (const r of D.act) vote(r[0], r[1], r[3]);
   for (const r of D.clo) vote(r[0], r[1], r[3]);
   for (const r of D.inb) vote(r[0], r[1], r[5]);
+  for (const r of D.sla) vote(r[0], r[1], 1);
   for (const [p, m] of votes) pteam.set(p, [...m].sort((a, b) => b[1] - a[1])[0][0]);
-  return { D, X: { lo, hi }, I: { pday, comp, compOwn, pteam } };
+  const slaBy = new Map();   // person -> SLA rows
+  for (const r of D.sla) { let a = slaBy.get(r[1]); if (!a) slaBy.set(r[1], (a = [])); a.push(r); }
+  return { D, has, X: { lo, hi }, XS: { lo: slo, hi: shi }, XA: { lo: Math.min(lo, slo), hi: Math.max(hi, shi) }, I: { pday, comp, compOwn, pteam, slaBy } };
 }
 export const pv = (M, p, d, i) => { const m = M.I.pday.get(p), v = m && m.get(d); return v ? v[i] : 0; };
 
@@ -82,6 +98,9 @@ function fit(M, key, p) {
   });
   return n >= 4 && base > 0 ? err / base : null;
 }
+// The "No case owner (team)" row the worker makes for emails on cases with no known owner: it has customer
+// emails but nobody actioning them, so it stays out of every % actioned.
+export const isUnowned = (M, p) => p >= 0 && /^No case owner \(/.test(M.D.people[p]);
 const activity = (M, p) => { let n = 0; const m = M.I.pday.get(p); if (m) for (const v of m.values()) n += v[0] + v[1]; return n; };
 const personByName = (M, name) => M.D.people.findIndex((n) => n.toLowerCase() === String(name).trim().toLowerCase());
 
@@ -153,30 +172,46 @@ export function buildLayout(M, ovr = new Map()) {
       L.cust.push({ id: bi, label: b.label, p, rowKey: r ? r.key : null, mailbox: b.mailbox, ceva: b.ceva, total: b.total || !b.mailbox,
         customers: b.customers.map((c, ci) => ({ id: bi + ':' + ci, label: c, comps: none ? [] : matchCompanies(M, c, allowed) })) });
     });
+    // A team with nobody on the workbook (a team folder the workbook doesn't track) gets a section of its
+    // own with full names, so its numbers still show. Others not on the workbook (queues, supervisors)
+    // stay on the Names tab's list.
+    const onRow = new Set(L.sections.flatMap((s) => s.rows.map((r) => r.p)).filter((p) => p >= 0));
+    const covered = new Set([...onRow].map((p) => M.I.pteam.get(p)));
+    teamSections(M, L, (p) => !onRow.has(p) && !covered.has(M.I.pteam.get(p)), 'Team not on the workbook');
   } else {
-    // Without the workbook: one section per team folder, full names A to Z, and per person the
-    // customers on the cases they own.
-    const by = new Map();
-    for (const tbl of [D.act, D.clo]) for (const r of tbl) if (r[1] >= 0) { const t = M.I.pteam.get(r[1]); if (!by.has(t)) by.set(t, new Set()); by.get(t).add(r[1]); }
-    for (const t of [...by.keys()].sort((a, b) => byText(D.teams[a], D.teams[b]))) {
-      const ps = [...by.get(t)].sort((a, b) => byText(D.people[a], D.people[b]));
-      const name = D.teams[t].toUpperCase();
-      L.sections.push({ name, rows: ps.map((p) => ({ key: name + '|' + D.people[p], label: D.people[p], p, how: 'Salesforce name' })) });
-      for (const p of ps) {
-        const comps = [...new Set(D.inb.filter((r) => r[1] === p && !r[4]).map((r) => r[2]))].sort((a, b) => byText(D.companies[a], D.companies[b]));
-        const id = L.cust.length;
-        L.cust.push({ id, label: D.people[p], p, rowKey: name + '|' + D.people[p], mailbox: false, ceva: true, total: true, ownerOnly: true,
-          customers: comps.map((c, ci) => ({ id: id + ':' + ci, label: D.companies[c], comps: [c] })) });
-      }
-    }
+    // Without the workbook: one section per team folder, full names A to Z.
+    teamSections(M, L, () => true, 'Salesforce name');
   }
   return L;
+}
+// One section per team folder for the people `want` picks, full names A to Z, and per person (with emails
+// received) a CUST E-MAILS block of the customers on the cases they own.
+function teamSections(M, L, want, how) {
+  const D = M.D, by = new Map();
+  for (const [tbl, pi] of [[D.act, 1], [D.clo, 1], [D.inb, 1], [D.sla, 1]]) for (const r of tbl) {
+    const p = r[pi]; if (p < 0 || !want(p)) continue;
+    const t = M.I.pteam.get(p); if (!by.has(t)) by.set(t, new Set()); by.get(t).add(p);
+  }
+  const taken = new Set(L.sections.map((s) => s.name));
+  for (const t of [...by.keys()].sort((a, b) => byText(D.teams[a], D.teams[b]))) {
+    const ps = [...by.get(t)].sort((a, b) => byText(D.people[a], D.people[b]));
+    let name = D.teams[t].toUpperCase(); if (taken.has(name)) name += ' (TEAM)';
+    taken.add(name);
+    L.sections.push({ name, rows: ps.map((p) => ({ key: name + '|' + D.people[p], label: D.people[p], p, how })) });
+    for (const p of ps) {
+      if (!D.inb.some((r) => r[1] === p)) continue;
+      const comps = [...new Set(D.inb.filter((r) => r[1] === p && !r[4]).map((r) => r[2]))].sort((a, b) => byText(D.companies[a], D.companies[b]));
+      const id = L.cust.length;
+      L.cust.push({ id, label: D.people[p], p, rowKey: name + '|' + D.people[p], mailbox: false, ceva: true, total: true, ownerOnly: true, unowned: isUnowned(M, p),
+        customers: comps.map((c, ci) => ({ id: id + ':' + ci, label: D.companies[c], comps: [c] })) });
+    }
+  }
 }
 // People in the exports who aren't on the layout (queues, supervisors, other teams), most active first.
 export function unlisted(M, L) {
   const on = new Set(L.sections.flatMap((s) => s.rows.map((r) => r.p)));
-  return M.D.people.map((n, p) => ({ p, name: n, team: M.D.teams[M.I.pteam.get(p)] || '', n: activity(M, p) }))
-    .filter((x) => !on.has(x.p) && x.n > 0).sort((a, b) => b.n - a.n);
+  return M.D.people.map((n, p) => ({ p, name: n, team: M.D.teams[M.I.pteam.get(p)] || '', n: activity(M, p), sla: (M.I.slaBy.get(p) || []).length }))
+    .filter((x) => !on.has(x.p) && x.n + x.sla > 0).sort((a, b) => b.n - a.n || b.sla - a.sla);
 }
 
 // Customer rows on CUST E-MAILS use the workbook's own customer names; they are matched to Salesforce
@@ -243,8 +278,12 @@ export const visibleBlocks = (L, F) => L.cust.filter((b) => b.rowKey && F.rows.h
 
 // ---------- tables: one model renders to HTML, copies as text and exports to Excel ----------
 // model: { cls, cols: [{ h (html), x (plain), cls, d (day), wk }], rows: [{ cls, c: [cell] }] }; cell: { v, f, cls, title }
-// f: 's' text, 'n' count (blank when 0), 'z' count (0 shown), 'p' percent
+// f: 's' text, 'n' count (blank when 0), 'z' count (0 shown), 'p' percent against the 85% goal,
+//    'q' percent with one decimal (no goal), 't' minutes shown as "Hh MMm"
 export const cS = (v, cls, title) => ({ v, f: 's', cls, title }), cN = (v, cls) => ({ v, f: 'n', cls }), cZ = (v, cls) => ({ v, f: 'z', cls }), cP = (v, cls) => ({ v, f: 'p', cls });
+export const cQ = (v, cls) => ({ v, f: 'q', cls }), cT = (v, cls) => ({ v, f: 't', cls });
+// Like the SLA Dashboard (and its Power BI measure): ROUND(AVERAGE(minutes), 0) shown as "Hh MMm"
+export const fmtHM = (mins) => (mins == null || !isFinite(mins) ? '' : `${Math.floor(Math.round(mins) / 60)}h ${String(Math.round(mins) % 60).padStart(2, '0')}m`);
 export const goalCls = (p) => (p == null ? '' : p < GOAL ? 'low' : 'ok');
 export const col = (h, cls, x) => ({ h, cls, x: x ?? h.replace(/<small>/g, ' ').replace(/<[^>]+>/g, '').replace(/&amp;/g, '&') });
 export const dayCol = (d) => ({ ...col(`${DOW[dowOf(d)].toUpperCase()}<small>${md(d)}</small>`, isWeekday(d) ? '' : 'muted', md(d)), d });
@@ -291,6 +330,7 @@ export function custModel(M, L, F) {
     }
     if (b.ceva) rows.push(line('E-MAILS FROM CEVA STATIONS', ceva, '', 'indent'));
     if (b.total) rows.push(line('TOTAL', total, 'sub'));
+    if (b.unowned) continue;   // nobody to have actioned them
     rows.push(line('E-MAILS ACTIONED', act, 'key', '', `${rep}: emails actioned + cases closed`));
     const pct = (a, t) => (t ? a / t : null), all = pct(sumBy(days, act), sumBy(days, total));
     rows.push({ cls: 'key pct', c: [cS('% ACTIONED (GOAL 85%)'), ...days.map((d) => { const x = pct(act(d), total(d)); return cP(x, goalCls(x)); }), cP(all, goalCls(all))] });
@@ -305,8 +345,9 @@ export function personTotals(M, L, F) {
   const out = [];
   for (const s of L.sections) for (const r of s.rows) {
     if (!F.rows.has(r.key)) continue;
-    const t = { sec: s.name, key: r.key, label: r.label, p: r.p, act: 0, clo: 0, recv: null, worked: null };
+    const t = { sec: s.name, key: r.key, label: r.label, p: r.p, act: 0, clo: 0, recv: null, worked: null, sla: 0, met: 0, unowned: isUnowned(M, r.p) };
     if (r.p >= 0) for (const d of F.days) { t.act += pv(M, r.p, d, 0); t.clo += pv(M, r.p, d, 1); }
+    if (r.p >= 0) for (const x of slaOf(M, r.p, F)) { t.sla++; t.met += x[7]; }
     const bs = blocksOf.get(r.key);
     if (bs && r.p >= 0) {
       t.recv = 0;
@@ -318,13 +359,16 @@ export function personTotals(M, L, F) {
   return out;
 }
 export function summaryModel(M, L, F) {
-  const ts = personTotals(M, L, F);
-  const cols = [col('Person'), col('Cases actioned'), col('Cases closed'), col('Actioned + closed', 'wk'), col('Customer emails'), col('% actioned<small>goal 85%</small>', '', '% actioned')];
+  const ts = personTotals(M, L, F), cc = M.has.cc, sl = M.has.sla;
+  const cols = [col('Person'), ...(cc ? [col('Cases actioned'), col('Cases closed'), col('Actioned + closed', 'wk'), col('Customer emails'), col('% actioned<small>goal 85%</small>', '', '% actioned')] : []),
+    ...(sl ? [col('SLA cases'), col('SLA met %')] : [])];
   const line = (label, xs, lcls, title) => {
     const a = xs.reduce((s, x) => s + x.act, 0), c = xs.reduce((s, x) => s + x.clo, 0);
-    const withB = xs.filter((x) => x.recv != null), recv = withB.reduce((s, x) => s + x.recv, 0), worked = withB.reduce((s, x) => s + x.worked, 0);
-    const p = withB.length && recv ? worked / recv : null;
-    return [cS(label, lcls, title), cZ(a), cZ(c), cZ(a + c), withB.length ? cZ(recv) : cS(''), cP(p, goalCls(p))];
+    const withB = xs.filter((x) => x.recv != null), recv = withB.reduce((s, x) => s + x.recv, 0);
+    const own = withB.filter((x) => !x.unowned), orecv = own.reduce((s, x) => s + x.recv, 0), worked = own.reduce((s, x) => s + x.worked, 0);
+    const p = own.length && orecv ? worked / orecv : null;
+    const n = xs.reduce((s, x) => s + x.sla, 0), met = xs.reduce((s, x) => s + x.met, 0);
+    return [cS(label, lcls, title), ...(cc ? [cZ(a), cZ(c), cZ(a + c), withB.length ? cZ(recv) : cS(''), cP(p, goalCls(p))] : []), ...(sl ? [cZ(n), cQ(n ? met / n : null)] : [])];
   };
   const rows = [], secs = [...new Set(ts.map((x) => x.sec))];
   for (const s of secs) {
@@ -340,11 +384,12 @@ export function summaryModel(M, L, F) {
 export function daily(M, L, F) {
   const ps = [...new Set(L.sections.flatMap((s) => s.rows.filter((r) => F.rows.has(r.key) && r.p >= 0).map((r) => r.p)))];
   const blocks = L.cust.filter((b) => b.rowKey && F.rows.has(b.rowKey)).map((b) => ({ b, ...blockLines(M, b) }));
+  // recv: every customer email shown; precv: those with someone to action them (the base of % actioned)
   return F.days.map((d) => {
-    let act = 0, clo = 0, recv = 0, worked = 0;
+    let act = 0, clo = 0, recv = 0, precv = 0, worked = 0;
     for (const p of ps) { act += pv(M, p, d, 0); clo += pv(M, p, d, 1); }
-    for (const x of blocks) if (x.b.p >= 0) { recv += x.total(d); worked += x.act(d); }
-    return { d, act, clo, recv, worked };
+    for (const x of blocks) if (x.b.p >= 0) { const t = x.total(d); recv += t; if (!x.b.unowned) { precv += t; worked += x.act(d); } }
+    return { d, act, clo, recv, precv, worked };
   });
 }
 // Customer rows by emails received in the range (for the overview bars).
@@ -355,4 +400,71 @@ export function topCustomers(M, L, F, n = 10) {
     for (const c of custs) if ((!F.cust || F.cust.has(c.id)) && c.comps.length) out.push({ label: b.mailbox ? b.label : c.label, rep: b.label, n: sumBy(F.days, c.f) });
   }
   return out.filter((x) => x.n > 0).sort((a, b) => b.n - a.n).slice(0, n);
+}
+
+// ---------- SLA (response time) ----------
+// SLA cases count by the day they were opened, every day in the range (weekends too), for the people on the
+// rows the filters show. F.from / F.to bound the range.
+export function slaOf(M, p, F) {
+  const a = M.I.slaBy.get(p); if (!a) return [];
+  return a.filter((r) => { const d = slaDay(r); return d >= F.from && d <= F.to; });
+}
+export function slaRows(M, L, F) {
+  const ps = new Set(L.sections.flatMap((s) => s.rows.filter((r) => F.rows.has(r.key) && r.p >= 0).map((r) => r.p)));
+  return [...ps].flatMap((p) => slaOf(M, p, F));
+}
+// SLA cases in the date range whose owner isn't on any row (queues, supervisors), so they're not counted.
+export function slaOffRows(M, L, F) {
+  const on = new Set(L.sections.flatMap((s) => s.rows.map((r) => r.p)).filter((p) => p >= 0));
+  return M.D.sla.filter((r) => !on.has(r[1]) && slaDay(r) >= F.from && slaDay(r) <= F.to).length;
+}
+export function slaStats(rows) {
+  const s = { n: 0, met: 0, sum: 0, cnt: 0, m: { n: 0, sum: 0, cnt: 0 }, b: { n: 0, sum: 0, cnt: 0 } };
+  for (const r of rows) {
+    const g = r[7] ? s.m : s.b; s.n++; g.n++; if (r[7]) s.met++;
+    if (r[5] != null) { s.sum += r[5]; s.cnt++; g.sum += r[5]; g.cnt++; }
+  }
+  return s;
+}
+export const slaAvg = (o) => (o && o.cnt ? o.sum / o.cnt : null);
+const isoWeekOf = (min) => { const x = new Date(Math.floor(min / 1440) * 864e5), day = x.getUTCDay() || 7; x.setUTCDate(x.getUTCDate() + 4 - day); const y0 = Date.UTC(x.getUTCFullYear(), 0, 1); return [x.getUTCFullYear(), Math.ceil(((x - y0) / 864e5 + 1) / 7)]; };
+// Ways to group the SLA table: key and label per case, and how the groups are ordered.
+export function slaGroups(M, L) {
+  const D = M.D, label = new Map();
+  for (const s of L.sections) for (const r of s.rows) if (r.p >= 0 && !label.has(r.p)) label.set(r.p, r.label);
+  const txt = (i) => D.strs[i] || '(Blank)';
+  return {
+    owner: { name: 'Case owner', key: (r) => r[1], label: (k) => (k >= 0 ? label.get(k) || D.people[k] : '(No owner)'), title: (k) => (k >= 0 ? D.people[k] : ''), order: 'n' },
+    week: { name: 'Week', key: (r) => { const [y, w] = isoWeekOf(r[3]); return y * 100 + (r[13] || w); }, label: (k, rs) => { const ds = rs.map(slaDay); return `Week ${k % 100} (${md(Math.min(...ds))} – ${md(Math.max(...ds))})`; }, order: 'k' },
+    day: { name: 'Day opened', key: slaDay, label: (k) => `${DOW[dowOf(k)]} ${md(k)}`, order: 'k' },
+    company: { name: 'Company', key: (r) => r[2], label: txt, order: 'n' },
+    parent: { name: 'Ultimate parent', key: (r) => r[10], label: txt, order: 'n' },
+    segment: { name: 'Customer segment', key: (r) => r[9], label: txt, order: 't' },
+    status: { name: 'Status', key: (r) => r[8], label: txt, order: 't' },
+  };
+}
+// The SLA matrix: per group, SLA met and breached (average elapsed time and cases), then the total and SLA met %.
+export function slaModel(M, L, rows, by, sel) {
+  const G = slaGroups(M, L)[by], m = new Map();
+  for (const r of rows) { const k = G.key(r); let a = m.get(k); if (!a) m.set(k, (a = [])); a.push(r); }
+  let groups = [...m].map(([k, rs]) => ({ k, rs, s: slaStats(rs), l: G.label(k, rs) }));
+  groups.sort(G.order === 'k' ? (a, b) => a.k - b.k : G.order === 't' ? (a, b) => byText(a.l, b.l) : (a, b) => b.s.n - a.s.n || byText(a.l, b.l));
+  const cols = [col(G.name), col('Met<small>avg elapsed</small>', 'met', 'Met avg elapsed'), col('Met<small>cases</small>', 'met', 'Met cases'),
+    col('Breached<small>avg elapsed</small>', 'br', 'Breached avg elapsed'), col('Breached<small>cases</small>', 'br', 'Breached cases'),
+    col('Total<small>avg elapsed</small>', 'wk', 'Total avg elapsed'), col('Total<small>cases</small>', 'wk', 'Total cases'), col('SLA met %', 'wk')];
+  const cells = (s) => [cT(slaAvg(s.m)), cN(s.m.n), cT(slaAvg(s.b)), cN(s.b.n, s.b.n ? 'low' : ''), cT(slaAvg(s)), cZ(s.n), cQ(s.n ? s.met / s.n : null)];
+  const out = groups.map((g) => ({ cls: sel === String(g.k) ? 'selr' : '', sel: String(g.k), c: [cS(g.l, '', G.title ? G.title(g.k) : g.l), ...cells(g.s)] }));
+  if (groups.length > 1) out.push({ cls: 'total', c: [cS('Total'), ...cells(slaStats(rows))] });
+  return { cls: 'mx sla', cols, rows: out, empty: 'No SLA cases for these filters.' };
+}
+export const slaPick = (M, L, rows, by, sel) => { if (sel == null) return rows; const G = slaGroups(M, L)[by]; return rows.filter((r) => String(G.key(r)) === sel); };
+const mdt = (min) => { if (min == null) return ''; const d = new Date(min * 6e4); let h = d.getUTCHours(); const ap = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12; return `${d.getUTCMonth() + 1}/${d.getUTCDate()}/${d.getUTCFullYear()} ${h}:${String(d.getUTCMinutes()).padStart(2, '0')} ${ap}`; };
+// The case list under the matrix, newest first.
+export function slaCasesModel(M, rows, limit) {
+  const D = M.D, txt = (i) => D.strs[i] || '';
+  const list = rows.slice().sort((a, b) => b[3] - a[3]);
+  const cols = [col('Case #'), col('Opened'), col('Closed'), col('Case owner'), col('Company'), col('Subject'), col('Status'), col('Segment'), col('Target'), col('Elapsed'), col('SLA')];
+  const out = list.slice(0, limit).map((r) => ({ c: [cS(r[11]), cS(mdt(r[3])), cS(mdt(r[4])), cS(r[1] >= 0 ? D.people[r[1]] : ''), cS(txt(r[2])), cS(txt(r[12]), 'subj', txt(r[12])),
+    cS(txt(r[8])), cS(txt(r[9])), cT(r[6]), cT(r[5]), cS(r[7] ? 'Met' : 'Breached', r[7] ? 'ok' : 'low')] }));
+  return { cls: 'sla-cases', cols, rows: out, total: list.length, empty: 'No SLA cases for these filters.' };
 }

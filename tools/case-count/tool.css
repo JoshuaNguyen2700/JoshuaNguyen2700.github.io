@@ -263,3 +263,15 @@
 .cc-pending .actions{justify-content:flex-start;margin-top:18px}
 .cc-pending .actions .btn{margin-top:0;border:0;font:inherit;font-size:17px;cursor:pointer}
 .cc-pending .cc-hint{text-align:left}
+
+/* ---- SLA tab ---- */
+.cc table.sla th.met{color:var(--good)}
+.cc table.sla th.br{color:var(--crit)}
+.cc table.sla tbody tr[data-sel]{cursor:pointer}
+.cc table.sla tr.selr td{box-shadow:inset 0 0 0 100vmax var(--o-hover);font-weight:600}
+.cc table.sla tr.selr td:first-child{box-shadow:inset 3px 0 0 var(--accent),inset 0 0 0 100vmax var(--o-hover)}
+.cc table.sla-cases td.subj{max-width:320px;overflow:hidden;text-overflow:ellipsis}
+.cc #slaBy{margin-left:4px}
+.sla-more{display:flex;justify-content:center;padding:12px 0 4px}
+.cc table.sla-cases th,.cc table.sla-cases td{text-align:left}
+.cc table.sla-cases th:nth-child(9),.cc table.sla-cases td:nth-child(9),.cc table.sla-cases th:nth-child(10),.cc table.sla-cases td:nth-child(10){text-align:right}
