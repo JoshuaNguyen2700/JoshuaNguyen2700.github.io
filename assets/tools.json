@@ -2,7 +2,7 @@
   "tools": [
     {
       "id": "case-count",
-      "name": "Case Count & SLA",
+      "name": "CView Dash",
       "blurb": "Actioned & closed · Response time",
       "status": "live",
       "icon": "chart",
