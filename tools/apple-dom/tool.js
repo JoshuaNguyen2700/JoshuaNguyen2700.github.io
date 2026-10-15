@@ -260,7 +260,7 @@ function renderPpt() {
   // Slide 6 (and the Pivot-Hawb J:O table)
   const z = (o, f) => (o.due == null ? '' : o.due ? fmtP(f(o), 1) : f === adj ? '100%' : '0');
   const pivotRows = p.s6.slice(2, -1).concat([{ ...p.s6[0], label: 'TOTAL' }, { ...p.s6[1], label: 'TOTAL(NO AC)' }]);
-  tableCard($('#s6'), 'Slide 6 · OTD by HAWB (LTL)', 'Same numbers as the Pivot-Hawb J:O table', ['Origin', 'HAWB Due', 'Late', 'Carrier late', 'Unadjusted OTD%', 'Adjusted OTD %'],
+  tableCard($('#s6'), 'Slide 6 · OTD by HAWB (FTL + LTL)', 'Same numbers as the Pivot-Hawb J:O table', ['Origin', 'HAWB Due', 'Late', 'Carrier late', 'Unadjusted OTD%', 'Adjusted OTD %'],
     p.s6.map((o) => `<tr${o.label === 'QTD' ? ' class="tot"' : ''}><td class="l">${esc(o.label)}</td><td class="num">${fmtN(o.due)}</td><td class="num">${fmtN(o.late)}</td><td class="num">${fmtN(o.carrier)}</td>${o.due == null ? '<td class="num">–</td><td class="num">–</td>' : o.due ? pctCell(unadj(o), 1) + pctCell(adj(o), 1) : '<td class="num">0</td><td class="num g-ok">100%</td>'}</tr>`),
     [{ label: 'Copy for slide', text: () => tsv(p.s6.map((o) => [o.label, fmtN(o.due), z(o, unadj), z(o, adj)])) },
      { label: 'Copy for Pivot-Hawb', text: () => tsv(pivotRows.map((o) => [o.label, o.due, o.late, o.carrier])) }]);

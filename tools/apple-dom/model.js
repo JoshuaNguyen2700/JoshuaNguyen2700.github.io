@@ -159,11 +159,11 @@ export function pptTables(recs, sel, qtd = null) {
   if (other.due) s4.push(other);
   s4.push(row('AppleCare', tabScope('ACN,ACP')));
   s4.push({ label: 'QTD', ...(qtd?.units || { due: null, late: null, carrier: null }) });
-  // Slide 6 / Pivot-Hawb J:O: LTL HAWBs
-  const H = { tl: 'LTL', hawb: true };
+  // Slide 6 / Pivot-Hawb J:O: every HAWB due that week, FTL and LTL together (FW2 FY27 Pivot-Hawb: 519 = 371 LTL + 148 FTL)
+  const H = { hawb: true };
   const s6 = [row('Overall(WITH AC)', ALL, H), row('Overall(NO AC)', NOAC, H)];
   for (const t of OEM_TABS) s6.push(row(t === 'ACN,ACP' ? 'Applecre(ACP,ACN)' : t, tabScope(t), H));
-  s6.push({ label: 'QTD', ...(qtd?.hawb || { due: null, late: null, carrier: null }) });
+  s6.push({ label: 'QTD', ...(qtd?.hawbAll || { due: null, late: null, carrier: null }) });
   // Slide 5: carrier delays. A1/C by lane (top 10 + Others); every other carrier code grouped by comment.
   const car = recs.filter((r) => r.wk === wk && r.late && r.carrier);
   const lane = (o, d) => `${originCode(o)}-${station(d)}`;
