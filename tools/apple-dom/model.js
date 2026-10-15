@@ -1,7 +1,7 @@
 // Core of the apple-dom tool: reads the APPLE_AMR export, computes the weekly OTD numbers and delay-code
 // Paretos, writes them into the "Apple Dom WK# Charts Template" workbook, and builds the PPT tables.
 // Pure module (no DOM), so it runs in the page's worker and under Node for testing.
-import { openBook, listZip, entryReader } from '../otp/parse.js?v=20261015-2';
+import { openBook, listZip, entryReader } from '../otp/parse.js?v=20261015-3';
 
 // ---------- Apple fiscal calendar ----------
 // Weeks run Sunday to Saturday; the fiscal year ends on the last Saturday of September
@@ -142,6 +142,9 @@ const titleCase = (b) => (/^[A-Z]{1,3}$/.test(b) ? b : b.split(' ').map((w) => (
 // Apple origin cities to airport codes (from "Commonly used terms.docx")
 const ORIGIN = { CLAYTON: 'IND', LEBANON: 'BNA', CARLISLE: 'MDT', SPARKS: 'RNO', RIALTO: 'ONT', PLAINFIELD: 'ONT' };
 const originCode = (city) => ORIGIN[String(city || '').trim().toUpperCase()] || String(city || '').trim();
+// CEVA hub codes in delay comments, written out the way slide 5 shows them ("H10 OUTBOUND" -> "Chicago OUTBOUND")
+const HUBS = { H01: 'Columbus', H05: 'Atlanta', H06: 'DFW', H08: 'Ontario', H10: 'Chicago', H11: 'Denver' };
+export const expandHubs = (t) => String(t || '').replace(/\bH(\d{2})\b/gi, (m, n) => HUBS['H' + n] || m);
 const station = (z) => String(z || '').trim().replace(/^DS-/i, '');
 
 // qtd: quarter-to-date totals from the filled template ({ units, unitsNoAC, hawb, hawbNoAC }); without a template QTD is left blank.
@@ -185,7 +188,7 @@ export function pptTables(recs, sel, qtd = null) {
     s5.push({ head: true, label: p1 ? (codes.length > 1 ? `${p1} & OTHER CARRIER DELAY` : p1) : 'OTHER CARRIER DELAY', lane: '', ...sum(oth) });
     const items = [...groupBy(oth, (r) => norm(r.comments) || '#' + r.code)].map(([, rows]) => {
       const o = [...new Set(rows.map((r) => originCode(r.origin)))].join('/'), d = [...new Set(rows.map((r) => station(r.dzip)))].join('/');
-      return { label: rows[0].comments.replace(/\s+/g, ' ').trim() || shortCode(rows[0].code), lane: `${o}-${d}`, ...sum(rows) };
+      return { label: expandHubs(rows[0].comments.replace(/\s+/g, ' ').trim()) || shortCode(rows[0].code), lane: `${o}-${d}`, ...sum(rows) };
     }).sort((a, b) => b.units - a.units);
     items.forEach((x) => s5.push(x));
   }

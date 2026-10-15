@@ -3,7 +3,7 @@
 // the browser with model.js, writes the week's numbers into the template and builds the PowerPoint tables.
 // Nothing is uploaded; the template is kept in this browser's IndexedDB so later weeks only need the AMR file.
 import { esc } from '/assets/core/util.js';
-import { quarterOf, weekRange, slide8Text } from './model.js?v=20261015-2';
+import { quarterOf, weekRange, slide8Text } from './model.js?v=20261015-3';
 
 const $ = (s) => document.querySelector(s);
 const fmtN = (n) => (n == null ? '–' : Math.round(n).toLocaleString('en-US'));
@@ -47,7 +47,7 @@ function pptState() {
 }
 
 // ---------- worker ----------
-const worker = new Worker(new URL('worker.js?v=20261015-2', import.meta.url), { type: 'module' });
+const worker = new Worker(new URL('worker.js?v=20261015-3', import.meta.url), { type: 'module' });
 let pending = null;
 const ask = (msg) => new Promise((ok, no) => { pending = { ok, no, type: msg.type }; worker.postMessage(msg); });
 worker.onmessage = (e) => {
