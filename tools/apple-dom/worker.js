@@ -1,6 +1,6 @@
 // Background worker for the apple-dom tool: reads the Excel files and writes the filled template off the main thread.
-import { readAmr, weekChoices, fillTemplate, pptTables, isChartsTemplate, looksLikeAmrName, outName, quarterOf, fileDate } from './model.js';
-import { buildDeck, deckName, isDeck } from './deck.js';
+import { readAmr, weekChoices, fillTemplate, pptTables, isChartsTemplate, looksLikeAmrName, outName, quarterOf, fileDate } from './model.js?v=20261015-2';
+import { buildDeck, deckName, isDeck } from './deck.js?v=20261015-2';
 
 let AMR = null;    // { recs, name, weeks }
 let LAST = null;   // last filled template: { sel, charts, xlsx, ppt }, used to build the PowerPoint

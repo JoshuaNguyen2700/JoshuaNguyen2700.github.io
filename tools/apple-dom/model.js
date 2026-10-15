@@ -1,7 +1,7 @@
 // Core of the apple-dom tool: reads the APPLE_AMR export, computes the weekly OTD numbers and delay-code
 // Paretos, writes them into the "Apple Dom WK# Charts Template" workbook, and builds the PPT tables.
 // Pure module (no DOM), so it runs in the page's worker and under Node for testing.
-import { openBook, listZip, entryReader } from '../otp/parse.js';
+import { openBook, listZip, entryReader } from '../otp/parse.js?v=20261015-2';
 
 // ---------- Apple fiscal calendar ----------
 // Weeks run Sunday to Saturday; the fiscal year ends on the last Saturday of September

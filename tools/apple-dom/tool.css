@@ -119,3 +119,4 @@ body.dragging .ad-drop{border-color:var(--accent);color:var(--text);background:v
   .ad-meta-actions{justify-content:flex-start}
 }
 .ad-saved{margin:0;font-size:13px;color:var(--good)}
+.ad-version{max-width:1240px;margin:0 auto;padding:0 var(--gutter) 16px;font-size:12px;color:var(--muted)}

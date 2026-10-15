@@ -2,7 +2,7 @@
 // KPI Metrics, closing). Updates the title slide, the slide 4/5/6 tables, the slide 8 comments and the week labels,
 // and puts the Charts Template's own charts on slides 7-9 as editable PowerPoint charts (each carries the filled
 // workbook, so "Edit Data" opens it). Pure module: runs in the worker and under Node.
-import { unzip, zip, quarterOf, slide8Text } from './model.js';
+import { unzip, zip, quarterOf, slide8Text } from './model.js?v=20261015-2';
 
 const dec = new TextDecoder(), enc = new TextEncoder();
 const xesc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
