@@ -1,8 +1,9 @@
 // Logic for the otp tool only. It is an ES module, so nothing here leaks into other pages.
-// The page ships with no shipment data. The visitor picks the regional Excel exports (.xlsx or .xlsb); worker.js
-// reads them in the browser with parse.js (nothing is uploaded). A saved data file (.json, from
+// The page ships with no shipment data. The visitor picks the regional Excel exports (.xlsx or .xlsb); workers
+// (worker.js) read several at once in the browser with parse.js (nothing is uploaded). A saved data file (.json, from
 // "Save data file" or build_otp_dashboard.py) opens instantly instead.
 import { esc } from '/assets/core/util.js';
+import { listTasks, combine } from './parse.js';
 
 const $ = (s) => document.querySelector(s);
 const OLD_DATA_KEY = 'otp.data'; // copy kept by the old "Remember" option; deleted on load
@@ -148,8 +149,11 @@ function readJson(file) {
   fr.readAsText(file);
 }
 
-let worker = null;
-function readExcel(files) {
+// Several files are read at once, each in its own worker (up to 3, fewer on small machines); the page then
+// combines them. A worker takes the next file as soon as it finishes one.
+let workers = [], readRun = 0;
+const stopWorkers = () => { workers.forEach((w) => w.terminate()); workers = []; };
+async function readExcel(files) {
   if (typeof DecompressionStream === 'undefined' || typeof Worker === 'undefined') {
     showStartError('This browser cannot read Excel files directly. Use a current version of Edge, Chrome, Firefox or Safari.');
     return;
@@ -157,40 +161,56 @@ function readExcel(files) {
   showStartError('');
   const list = $('#progressList'), rows = new Map();
   list.innerHTML = '';
-  for (const f of files) {
-    const li = document.createElement('li');
-    li.innerHTML = `<div class="pf"><b>${esc(f.name)}</b><span>Waiting</span></div><div class="bar"><i></i></div>`;
-    list.append(li); rows.set(f.name, li);
-  }
-  // Files inside a .zip are only known once the worker opens it, so their rows are added as they appear.
+  // Files inside a .zip are only known once it is opened, so their rows are added under it as they appear.
   const addRow = (name, after) => {
     const li = document.createElement('li');
     li.innerHTML = `<div class="pf"><b>${esc(name)}</b><span>Waiting</span></div><div class="bar"><i></i></div>`;
     if (after) after.after(li); else list.append(li);
     rows.set(name, li); return li;
   };
+  for (const f of files) addRow(f.name);
   const done = new Set(), count = () => { $('#progressCount').innerHTML = `<span class="otp-pcount">${done.size} of ${rows.size} file${rows.size === 1 ? '' : 's'} done.</span>`; };
+  const progress = (m) => {
+    if (m.zip) { let at = rows.get(m.file); for (const n of m.zip) if (!rows.has(n)) at = addRow(n, at); }
+    const li = rows.get(m.file) || addRow(m.file);
+    li.querySelector('span').textContent = m.rows != null ? `${fmtN(m.rows)} shipments` : m.stage;
+    li.querySelector('i').style.width = m.pct + '%';
+    li.classList.toggle('skip', !!m.skipped);
+    if (m.pct >= 100) { done.add(m.file); count(); }
+  };
   count();
   show('progress');
-  if (worker) worker.terminate();
-  worker = new Worker(new URL('worker.js', import.meta.url), { type: 'module' });
-  worker.onmessage = (e) => {
-    const m = e.data;
-    if (m.type === 'progress') {
-      if (m.zip) { let at = rows.get(m.file); for (const n of m.zip) if (!rows.has(n)) at = addRow(n, at); }
-      const li = rows.get(m.file) || addRow(m.file);
-      li.querySelector('span').textContent = m.rows != null ? `${fmtN(m.rows)} shipments` : m.stage;
-      li.querySelector('i').style.width = m.pct + '%';
-      li.classList.toggle('skip', !!m.skipped);
-      if (m.pct >= 100) { done.add(m.file); count(); }
-    } else {
-      worker.terminate(); worker = null;
-      if (m.type === 'done') { try { load(m.data); } catch (err) { showStartError(err.message); } }
-      else showStartError(m.message);
-    }
-  };
-  worker.onerror = (e) => { worker && worker.terminate(); worker = null; showStartError('Reading the files failed: ' + (e.message || 'unknown error') + '.'); };
-  worker.postMessage({ files });
+  stopWorkers();
+  const run = ++readRun;
+  try {
+    const { tasks, skipped } = await listTasks(files, progress);
+    if (run !== readRun) return;   // cancelled, or another set of files was chosen
+    const results = new Array(tasks.length);
+    const n = Math.min(tasks.length, Math.max(1, Math.min(3, (navigator.hardwareConcurrency || 4) - 1)));
+    let next = 0, left = tasks.length;
+    if (left) await new Promise((resolve, reject) => {
+      for (let i = 0; i < n; i++) {
+        const w = new Worker(new URL('worker.js', import.meta.url), { type: 'module' });
+        workers.push(w);
+        const feed = () => { if (next < tasks.length) { const id = next++; w.postMessage({ id, task: tasks[id] }); } };
+        w.onmessage = (e) => {
+          const m = e.data;
+          if (m.type === 'progress') return progress(m);
+          results[m.id] = m.result;
+          if (--left === 0) resolve(); else feed();
+        };
+        w.onerror = (e) => reject(new Error('Reading the files failed: ' + (e.message || 'unknown error') + '.'));
+        feed();
+      }
+    });
+    if (run !== readRun) return;
+    stopWorkers();
+    load(combine(results, skipped));
+  } catch (err) {
+    if (run !== readRun) return;
+    stopWorkers();
+    showStartError(err && err.message ? err.message : String(err));
+  }
 }
 
 // One entry point for the file pickers and drag-and-drop: Excel files are read, a .json opens directly.
@@ -203,12 +223,12 @@ function openFiles(fileList) {
 }
 $('#xlsxInput').addEventListener('change', (e) => { openFiles(e.target.files); e.target.value = ''; });
 $('#fileInput').addEventListener('change', (e) => { openFiles(e.target.files); e.target.value = ''; });
-$('#cancelBtn').addEventListener('click', () => { if (worker) { worker.terminate(); worker = null; } show(DATA ? 'app' : 'start'); });
+$('#cancelBtn').addEventListener('click', () => { readRun++; stopWorkers(); show(DATA ? 'app' : 'start'); });
 let dragDepth = 0;
 document.addEventListener('dragenter', (e) => { if ([...(e.dataTransfer?.types || [])].includes('Files')) { e.preventDefault(); dragDepth++; document.body.classList.add('dragging'); } });
 document.addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove('dragging'); } });
 document.addEventListener('dragover', (e) => e.preventDefault());
-document.addEventListener('drop', (e) => { e.preventDefault(); dragDepth = 0; document.body.classList.remove('dragging'); if (!worker) openFiles(e.dataTransfer?.files); });
+document.addEventListener('drop', (e) => { e.preventDefault(); dragDepth = 0; document.body.classList.remove('dragging'); if (!workers.length) openFiles(e.dataTransfer?.files); });
 
 $('#saveBtn').addEventListener('click', () => {
   if (!DATA) return;

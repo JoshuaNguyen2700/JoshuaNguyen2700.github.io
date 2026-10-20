@@ -481,63 +481,71 @@ class Aggregator {
 }
 
 // files: File/Blob objects with .name. progress({file, stage, pct}) is called as work advances.
-// A .zip of exports: list the .xlsx/.xlsb files inside (any folder). Each one is unpacked only when its turn
-// comes, so a zip of several 100+ MB exports never sits in memory all at once.
-async function zipContents(zip, progress) {
-  const out = [];
-  for (const [path, e] of await listZip(zip)) {
-    const base = path.split('/').pop();
-    if (!/\.xls[xb]$/i.test(base) || base.startsWith('~$') || path.startsWith('__MACOSX/')) continue;
-    out.push({ name: base, lastModified: e.mtime || zip.lastModified, fromZip: zip.name, open: async () => {
-      progress({ file: base, stage: 'Unzipping', pct: 1 });
-      const blob = e.method === 0 ? zip.slice(...await entryRange(zip, e)) : await new Response(await entryReader(zip, e, null, true).then((r) => new ReadableStream({
-        async pull(c) { const { value, done } = await r.read(); if (done) c.close(); else c.enqueue(value); } }))).blob();
-      return new File([blob], base, { lastModified: e.mtime || zip.lastModified });
-    } });
-  }
-  return out;
-}
-async function entryRange(blob, e) {
-  const lh = new DataView((await bytes(blob, e.off, e.off + 30)).buffer), start = e.off + 30 + lh.getUint16(26, true) + lh.getUint16(28, true);
-  return [start, start + e.csize];
-}
-
-export async function buildFromFiles(files, progress = () => {}) {
-  const agg = new Aggregator(), checks = {}, sources = [], skipped = [], best = new Map();
-  // Zips are opened first and replaced by the Excel files inside them.
-  const list = [];
+// ---------- reading a set of files ----------
+// A task is one workbook: a plain .xlsx/.xlsb File, or one entry inside a .zip ({ zip, path }). Tasks hold only
+// Files and strings, so the page can hand each one to its own worker and read several files at once.
+export async function listTasks(files, progress = () => {}) {
+  const tasks = [], skipped = [];
   for (const f of files) {
-    if (!/\.zip$/i.test(f.name)) { list.push(f); continue; }
+    if (/\.xls[xb]$/i.test(f.name)) { tasks.push({ name: f.name, file: f }); continue; }
+    if (!/\.zip$/i.test(f.name)) {
+      skipped.push({ file: f.name, reason: 'is not an .xlsx, .xlsb or .zip file' });
+      progress({ file: f.name, stage: 'Skipped: not an .xlsx, .xlsb or .zip file', pct: 100, skipped: true });
+      continue;
+    }
+    // A .zip of exports: every .xlsx/.xlsb inside (any folder) becomes a task of its own.
     try {
-      const inner = await zipContents(f, progress);
+      const inner = [];
+      for (const path of (await listZip(f)).keys()) {
+        const base = path.split('/').pop();
+        if (/\.xls[xb]$/i.test(base) && !base.startsWith('~$') && !path.startsWith('__MACOSX/')) inner.push({ name: base, zip: f, path });
+      }
       progress({ file: f.name, stage: inner.length ? `Unzipped: ${inner.map((x) => x.name).join(', ')}` : 'Skipped: no .xlsx or .xlsb files inside', pct: 100, skipped: !inner.length, zip: inner.map((x) => x.name) });
       if (!inner.length) skipped.push({ file: f.name, reason: 'has no .xlsx or .xlsb files inside' });
-      list.push(...inner);
+      tasks.push(...inner);
     } catch (e) {
       skipped.push({ file: f.name, reason: 'could not be opened as a zip file' });
       progress({ file: f.name, stage: 'Skipped: could not be opened as a zip file', pct: 100, skipped: true });
     }
   }
-  for (const item of list) {
-    if (!/\.xls[xb]$/i.test(item.name)) { skipped.push({ file: item.name, reason: 'is not an .xlsx, .xlsb or .zip file' }); progress({ file: item.name, stage: 'Skipped: not an .xlsx, .xlsb or .zip file', pct: 100, skipped: true }); continue; }
-    // only the name and date are kept afterwards, so an unzipped file can be freed once it has been read
-    const f = { name: item.name, lastModified: item.lastModified };
-    try {
-      const a = new Aggregator(), r = await processWorkbook(item.open ? await item.open() : item, a, progress);
-      // Two files for the same region (e.g. last week's and this week's export) would double count, so only
-      // the one with the latest shipments is used (if equal, the more recently saved file).
-      const prev = best.get(r.region);
-      const wins = !prev || r.maxShip > prev.r.maxShip || (r.maxShip === prev.r.maxShip && (f.lastModified || 0) > (prev.f.lastModified || 0));
-      if (prev) {
-        const [keep, drop] = wins ? [f, prev.f] : [prev.f, f];
-        const why = r.maxShip === prev.r.maxShip ? 'has the same shipments and was saved later' : 'has newer shipments';
-        skipped.push({ file: drop.name, reason: `is another ${r.region} file; ${keep.name} ${why} and is used instead` });
-      }
-      if (wins) best.set(r.region, { f, a, r });
-    } catch (e) {
-      skipped.push({ file: f.name, reason: e.message });
-      progress({ file: f.name, stage: 'Skipped: ' + e.message, pct: 100, skipped: true });
+  return { tasks, skipped };
+}
+
+// A workbook inside a zip is unpacked only when its task runs, so a zip of several 100+ MB exports never
+// sits in memory all at once. A stored (uncompressed) entry is just a slice of the zip.
+async function openTask(t, progress) {
+  if (t.file) return t.file;
+  const e = (await listZip(t.zip)).get(t.path), lastModified = e.mtime || t.zip.lastModified;
+  progress({ file: t.name, stage: 'Unzipping', pct: 1 });
+  const lh = new DataView((await bytes(t.zip, e.off, e.off + 30)).buffer), start = e.off + 30 + lh.getUint16(26, true) + lh.getUint16(28, true);
+  const raw = t.zip.slice(start, start + e.csize);
+  const blob = e.method === 0 ? raw : await new Response(raw.stream().pipeThrough(new DecompressionStream('deflate-raw'))).blob();
+  return new File([blob], t.name, { lastModified });
+}
+
+// Reads one task. The result is plain data (Maps, arrays and numbers), so a worker can post it back to the page.
+export async function readTask(t, progress = () => {}) {
+  const file = await openTask(t, progress), a = new Aggregator(), r = await processWorkbook(file, a, progress);
+  return { name: t.name, lastModified: file.lastModified || 0, r, agg: { dims: a.dims, pod: a.pod, ship: a.ship, delay: a.delay } };
+}
+
+// Combines the read tasks (in task order) into the dashboard data. A result with .error was skipped.
+export function combine(results, skipped = []) {
+  const agg = new Aggregator(), checks = {}, sources = [], best = new Map();
+  for (const res of results) {
+    if (!res) continue;
+    if (res.error) { skipped.push({ file: res.name, reason: res.error }); continue; }
+    const f = { name: res.name, lastModified: res.lastModified }, r = res.r;
+    // Two files for the same region (e.g. last week's and this week's export) would double count, so only
+    // the one with the latest shipments is used (if equal, the more recently saved file).
+    const prev = best.get(r.region);
+    const wins = !prev || r.maxShip > prev.r.maxShip || (r.maxShip === prev.r.maxShip && (f.lastModified || 0) > (prev.f.lastModified || 0));
+    if (prev) {
+      const [keep, drop] = wins ? [f, prev.f] : [prev.f, f];
+      const why = r.maxShip === prev.r.maxShip ? 'has the same shipments and was saved later' : 'has newer shipments';
+      skipped.push({ file: drop.name, reason: `is another ${r.region} file; ${keep.name} ${why} and is used instead` });
     }
+    if (wins) best.set(r.region, { f, a: res.agg, r });
   }
   for (const { f, a, r } of best.values()) {
     agg.merge(a);
@@ -546,4 +554,17 @@ export async function buildFromFiles(files, progress = () => {}) {
   }
   if (!sources.length) throw new Error(skipped.length ? `None of the files could be read. ${skipped[0].file} ${skipped[0].reason}.` : 'No files were chosen.');
   return Object.assign(agg.result(sources, checks), { skipped });
+}
+
+// Reads the files one after another in a single thread (used under Node for testing; the page uses
+// listTasks + readTask in several workers at once, then combine).
+export async function buildFromFiles(files, progress = () => {}) {
+  const { tasks, skipped } = await listTasks(files, progress), results = [];
+  for (const t of tasks) {
+    try { results.push(await readTask(t, progress)); } catch (e) {
+      results.push({ name: t.name, error: e.message });
+      progress({ file: t.name, stage: 'Skipped: ' + e.message, pct: 100, skipped: true });
+    }
+  }
+  return combine(results, skipped);
 }
