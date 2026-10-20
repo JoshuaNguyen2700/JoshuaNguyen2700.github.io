@@ -1431,6 +1431,12 @@ async function exportPpt() {
     const dG = D.grossRecent != null && D.grossPrior != null ? D.grossRecent - D.grossPrior : null;
     const dN = D.netRecent != null && D.netPrior != null ? D.netRecent - D.netPrior : null;
     const F = fcCompute(4, 12);
+    // revenue facts, shared by the summary and the revenue slides
+    const RV = showRev() && DATA.hasExp && t.h ? (() => {
+      const cust = [...moneyGroups(A.podRows, 1).values()], T$ = sumGroups(cust);
+      const losers = cust.filter((o) => o.net < 0).sort((a, b) => a.net - b.net), gainers = cust.filter((o) => o.net > 0).sort((a, b) => b.net - a.net);
+      return { cust, T$, losers, gainers, lossSum: losers.reduce((a, o) => a + o.net, 0), gainSum: gainers.reduce((a, o) => a + o.net, 0) };
+    })() : null;
 
     // 1. title
     {
@@ -1454,6 +1460,7 @@ async function exportPpt() {
         top ? ['Root causes. ', `${top.label} explains ${pctTxt(top.t / D.lateTotal)} of late shipments. Only ${pctTxt(D.ctrlTotal / D.lateTotal)} of late shipments carry a controllable code${ctrlTop ? `, led by ${ctrlTop.label} (${fmtN(ctrlTop.c)})` : ''}.`] : null,
         missing ? ['Data quality. ', `${pctTxt(missing.t / D.lateTotal)} of late shipments (${fmtN(missing.t)}) have no delay code and cannot be classified as controllable or not.`] : null,
         D.lowest.length ? ['Focus accounts. ', `${D.lowest.slice(0, 3).map((c) => c.name).join(', ')} have the lowest gross on-time; ${D.mostCtrl[0] ? D.mostCtrl[0].name + ' has the most controllable late shipments.' : ''}`] : null,
+        RV ? ['Revenue. ', `Net was ${RV.T$.net < 0 ? 'a loss of ' + fmt$c(-RV.T$.net) : fmt$c(RV.T$.net)} on ${fmt$c(RV.T$.rev)} of gross revenue (${pctTxt(RV.T$.margin)} margin); ${fmtN(RV.losers.length)} of ${fmtN(RV.cust.length)} customers lost money${RV.losers[0] ? `, led by ${dims.cust[RV.losers[0].k]} (${fmt$c(-RV.losers[0].net)} lost)` : ''}.`] : null,
         !F.err ? ['Outlook. ', `Volume is projected at about ${fmtN(F.vol.out[0].mid)} HAWBs a week over the next 4 weeks, with gross on-time near ${pctTxt(F.gross[0].mid)}.`] : null,
       ].filter(Boolean);
       s.addText(pts.map(([lead, txt]) => [{ text: lead, options: { bold: true, color: PPT.navy, bullet: { indent: 14 } } }, { text: txt, options: { breakLine: true } }]).flat(),
@@ -1599,7 +1606,110 @@ async function exportPpt() {
       }
     }
 
-    // 11. outlook
+    // 11-15. revenue (only when revenue is shown and the data has expense)
+    if (RV) {
+      const { cust, T$, losers, gainers, lossSum, gainSum } = RV, nrOn = DATA.hasNoRev, m$ = fmt$c;
+      const cname = (o, max = 40) => { const s = String(dims.cust[o.k]); return s.length > max ? s.slice(0, max - 1) + '…' : s; };
+      const negC = (v, o = {}) => cell(fmt$(v), { ...o, color: v < 0 ? PPT.red : v > 0 ? PPT.green : PPT.body });
+      const amt = (v) => m$(Math.abs(v));   // size of a loss, for sentences that already say "lost"
+      const NET_NOTE = 'Net = gross revenue (Total Revenue Charges) − gross expense (Total Expense Charges) on delivered HAWBs.';
+
+      // 11. revenue at a glance
+      {
+        const s = slide('Revenue', `Net was ${T$.net < 0 ? 'a loss of ' + amt(T$.net) : m$(T$.net)} on ${m$(T$.rev)} of gross revenue (${pctTxt(T$.margin)} margin); ${fmtN(losers.length)} of ${fmtN(cust.length)} customers lost money, ${amt(lossSum)} between them`, NET_NOTE);
+        const tiles = [
+          ['Net', m$(T$.net), `${pctTxt(T$.margin)} margin · ${fmt$(T$.perH)} per HAWB`, T$.net < 0],
+          ['Gross revenue', m$(T$.rev), `${fmtN(T$.h)} delivered HAWBs`, false],
+          ['Gross expense', m$(-T$.exp), 'money going out', T$.exp > 0],
+          ['Customers losing money', `${fmtN(losers.length)} of ${fmtN(cust.length)}`, `${amt(lossSum)} lost between them`, losers.length > 0],
+          ['Customers profitable', `${fmtN(gainers.length)} of ${fmtN(cust.length)}`, `${m$(gainSum)} net between them`, false],
+          nrOn ? ['Cost with no revenue', m$(-T$.nrc), `${fmtN(T$.nr)} HAWBs (${pctTxt(T$.h ? T$.nr / T$.h : null)} of delivered)`, T$.nrc > 0]
+            : ['Net per HAWB', fmt$(T$.perH), 'average across delivered HAWBs', T$.perH < 0],
+        ];
+        const tw3 = (CW - 2 * 0.45) / 3;
+        tiles.forEach(([lab, val, note, neg], i) => {
+          const x = M + (i % 3) * (tw3 + 0.45), y = 1.95 + Math.floor(i / 3) * 2.35;
+          s.addShape(pres.ShapeType.line, { x, y, w: tw3, h: 0, line: { color: i < 3 ? PPT.blue : PPT.gray, width: i < 3 ? 2.5 : 1 } });
+          s.addText(lab, { ...sans, x, y: y + 0.12, w: tw3, h: 0.35, fontSize: 12, bold: true, color: PPT.navy });
+          s.addText(val, { ...serif, x, y: y + 0.5, w: tw3, h: 0.95, fontSize: 44, color: neg ? PPT.red : PPT.navy });
+          s.addText(note, { ...sans, x, y: y + 1.45, w: tw3, h: 0.35, fontSize: 11, color: PPT.muted });
+        });
+      }
+
+      // 12. net by week
+      if (D.podKeys.length >= 2) {
+        const labels = D.podKeys.map(wl), wk = D.podKeys.map((k) => A.podW.get(k)), nets = wk.map((w) => w.rev - w.exp);
+        const negW = nets.filter((v) => v < 0).length, bi = nets.indexOf(Math.max(...nets)), wi = nets.indexOf(Math.min(...nets));
+        const totR = wk.reduce((a, w) => a + w.rev, 0), totE = wk.reduce((a, w) => a + w.exp, 0);
+        const s = slide('Revenue', negW ? `Net was negative in ${negW} of ${nets.length} weeks; the worst week was ${labels[wi]}, a loss of ${amt(nets[wi])}`
+          : `Net stayed positive in all ${nets.length} weeks, peaking at ${m$(nets[bi])} in ${labels[bi]}`);
+        const cw = CW - 3.55;
+        exhibitHead(s, M, cw, 'Net by POD week', `Gross revenue − gross expense, $, ${labels[0]} – ${labels[labels.length - 1]}`);
+        s.addChart(pres.ChartType.bar, [{ name: 'Net', labels, values: nets.map((v) => Math.round(v)) }], {
+          x: M, y: 2.5, w: cw, h: 4.2, ...clean, barDir: 'col', barGapWidthPct: 45, chartColors: nets.map((v) => (v < 0 ? PPT.red : PPT.green)), invertIfNegative: false,
+          valAxisHidden: true, showLegend: false, showValue: labels.length <= 16, dataLabelFormatCode: '$#,##0;-$#,##0', dataLabelPosition: 'outEnd', dataLabelFontSize: 8 });
+        takeaways(s, [
+          `Best week: ${labels[bi]} at ${m$(nets[bi])}.`,
+          nets[wi] < 0 ? `Worst week: ${labels[wi]}, a loss of ${amt(nets[wi])}.` : `Lowest week: ${labels[wi]} at ${m$(nets[wi])}.`,
+          `Over these ${nets.length} weeks: ${m$(totR)} revenue less ${m$(totE)} expense leaves ${m$(totR - totE)} net.`,
+        ]);
+      }
+
+      // 13. biggest losses and gains
+      {
+        const L = losers.slice(0, 8), G = gainers.slice(0, 8), items = [...L, ...G], lSum = L.reduce((a, o) => a + o.net, 0);
+        // room past the longest bar on each side, so its value label clears the customer names
+        const lo = Math.min(0, ...L.map((o) => o.net)), hi = Math.max(0, ...G.map((o) => o.net)), span = (hi - lo) || 1;
+        if (items.length) {
+          const s = slide('Revenue', losers.length ? `${cname(losers[0])} lost the most (${amt(losers[0].net)}); the ${L.length} biggest losses add up to ${amt(lSum)}, ${pctTxt(lossSum ? lSum / lossSum : null, 0)} of all losses`
+            : `Every customer was profitable; ${cname(gainers[0])} contributed the most at ${m$(gainers[0].net)}`);
+          const cw = CW - 3.55;
+          exhibitHead(s, M, cw, 'Biggest losses and gains by customer', `Net, $; top ${L.length} losses and top ${G.length} gains`);
+          s.addChart(pres.ChartType.bar, [{ name: 'Net', labels: items.map((o) => cname(o, 34)), values: items.map((o) => Math.round(o.net)) }], {
+            x: M, y: 2.5, w: cw, h: 4.2, ...clean, barDir: 'bar', catAxisOrientation: 'maxMin', catAxisLabelPos: 'low', barGapWidthPct: 35, valAxisHidden: true, invertIfNegative: false,
+            valAxisMinVal: Math.round(lo - span * (L.length ? 0.22 : 0)), valAxisMaxVal: Math.round(hi + span * (G.length ? 0.2 : 0)),
+            chartColors: items.map((o) => (o.net < 0 ? PPT.red : PPT.green)), showLegend: false, showValue: true, dataLabelFormatCode: '$#,##0;-$#,##0',
+            dataLabelPosition: 'outEnd', dataLabelFontSize: 8, catAxisLabelFontSize: 9 });
+          takeaways(s, [
+            `${fmtN(losers.length)} of ${fmtN(cust.length)} customers lost money, ${amt(lossSum)} in total.`,
+            `${fmtN(gainers.length)} were profitable, ${m$(gainSum)} in total${gainers[0] ? `, led by ${cname(gainers[0], 30)}` : ''}.`,
+            nrOn && T$.nr ? `${pctTxt(T$.nr / T$.h)} of delivered HAWBs carry cost but no revenue (${m$(T$.nrc)} of expense). Check whether that billing has posted before treating these as real losses.` : null,
+          ].filter(Boolean));
+        }
+      }
+
+      // 14. customers losing the most
+      if (losers.length) {
+        const top = losers.slice(0, 12), sum = top.reduce((a, o) => a + o.net, 0), exp = top.reduce((a, o) => a + o.exp, 0), nrc = top.reduce((a, o) => a + o.nrc, 0);
+        const s = slide('Revenue', `The ${top.length} customers losing the most lost ${amt(sum)} between them${nrOn && exp ? `; ${pctTxt(nrc / exp, 0)} of their expense sits on HAWBs with no revenue` : ''}`, NET_NOTE);
+        exhibitHead(s, M, CW, 'Customers losing the most money', `Top ${top.length} of ${fmtN(losers.length)} by net loss, selected period`);
+        const f = { fontSize: 10 };
+        table(s, [head(['Customer', 'Region', 'Delivered', 'Gross revenue', 'Gross expense', 'Net', 'Margin', ...(nrOn ? ['No-rev. HAWBs', 'Cost, no revenue'] : [])]),
+          ...top.map((o) => [cell(cname(o, 38), { ...f, align: 'left' }), cell(o.reg >= 0 ? dims.region[o.reg] : 'Several', { ...f, align: 'left' }), cell(fmtN(o.h), f),
+            cell(fmt$(o.rev), f), cell(fmt$(-o.exp), f), negC(o.net, { ...f, bold: true }), cell(pctTxt(o.margin), f),
+            ...(nrOn ? [cell(fmtN(o.nr), f), cell(fmt$(-o.nrc), f)] : [])])],
+          M, 2.55, nrOn ? [3.0, 0.95, 0.95, 1.3, 1.3, 1.25, 0.9, 1.15, 1.33] : [4.2, 1.3, 1.2, 1.5, 1.5, 1.4, 1.03], 0.3);
+      }
+
+      // 15. by region and CSR
+      {
+        const regs = [...moneyGroups(A.podRows, 0).values()].sort((a, b) => b.net - a.net), csrs = [...moneyGroups(A.podRows, 3).values()].sort((a, b) => a.net - b.net);
+        if (regs.length && csrs.length) {
+          const bestR = regs[0], worstC = csrs[0], half = (CW - 0.5) / 2, colW = [1.85, 1.1, 1.1, 1.05, 0.72], f = { fontSize: 10 };
+          const s = slide('Revenue', `${regs.length > 1 ? `${dims.region[bestR.k]} earns the most net (${m$(bestR.net)})` : `${dims.region[bestR.k]} net is ${m$(bestR.net)}`}; ${worstC.net < 0 ? `${dims.csr[worstC.k]}'s customers lose the most (${amt(worstC.net)})` : `every CSR's book is profitable`}`);
+          const rows = (list, dim) => list.map((o) => [cell(String(dims[dim][o.k]).slice(0, 26), { ...f, align: 'left' }), cell(m$(o.rev), f), cell(m$(-o.exp), f), negC(o.net, { ...f, bold: true }), cell(pctTxt(o.margin), f)]);
+          exhibitHead(s, M, half, 'Net by region', 'Selected period, highest net first');
+          table(s, [head(['Region', 'Revenue', 'Expense', 'Net', 'Margin']), ...rows(regs, 'region'),
+            [cell('Total', { ...f, align: 'left', bold: true }), cell(m$(T$.rev), { ...f, bold: true }), cell(m$(-T$.exp), { ...f, bold: true }), negC(T$.net, { ...f, bold: true }), cell(pctTxt(T$.margin), { ...f, bold: true })]],
+            M, 2.55, colW, 0.34);
+          const x2 = M + half + 0.5, shownC = csrs.slice(0, 11);
+          exhibitHead(s, x2, half, 'Net by CSR', `${shownC.length} of ${csrs.length} CSRs, biggest loss first`);
+          table(s, [head(['CSR', 'Revenue', 'Expense', 'Net', 'Margin']), ...rows(shownC, 'csr')], x2, 2.55, colW, 0.34);
+        }
+      }
+    }
+
+    // outlook
     if (!F.err) {
       const hist = F.ship.slice(-8), lastK = hist[hist.length - 1].k, avg4 = F.vol.out.reduce((s, p) => s + p.mid, 0) / F.vol.out.length;
       const s = slide('Outlook', `Volume is projected at about ${fmtN(avg4)} HAWBs a week over the next 4 weeks, with gross on-time near ${pctTxt(F.gross[0].mid, 0)} and net near ${pctTxt(F.net[0].mid, 1)}`,
@@ -1625,9 +1735,10 @@ async function exportPpt() {
         ['Gross on-time. ', 'Delivered on or before the adjusted due date: ship date plus SLA workdays, +1 day for each origin or destination zone outside A–E, excluding holidays.'],
         ['Net on-time. ', 'A late shipment counts against net on-time only when its delay code is Controllable.'],
         ['Weeks. ', 'Weeks start Monday (Excel WEEKNUM type 2). COSTCO+ and AMAZON use ISO weeks, so Dec 29 – Jan 4 is week 1 for them. The week in progress is excluded from weekly exhibits.'],
+        RV ? ['Revenue. ', 'Gross revenue = Total Revenue Charges; gross expense = Total Expense Charges (stored as negative amounts in the export, shown here as money going out); net = gross revenue − gross expense, on delivered HAWBs.' + (DATA.hasNoRev ? ' Cost with no revenue = expense on delivered HAWBs whose revenue is $0 or less, often billing that has not posted yet.' : '')] : null,
         ['Projections. ', 'Damped linear trend over the last 12 full weeks for volume; volume-weighted average for on-time %. Ranges cover about 8 in 10 weeks.'],
         ['Data. ', `${(DATA.sources || []).join(', ')}; built ${fmtBuilt(DATA.generated)}.`],
-      ];
+      ].filter(Boolean);
       s.addText(items.map(([lead, txt]) => [{ text: lead, options: { bold: true, color: PPT.navy, bullet: { indent: 14 } } }, { text: txt, options: { breakLine: true } }]).flat(),
         { ...sans, x: M, y: 1.8, w: CW, h: 4.9, fontSize: 13, valign: 'top', paraSpaceAfter: 10 });
     }
