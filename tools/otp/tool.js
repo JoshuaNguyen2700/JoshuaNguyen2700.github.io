@@ -11,8 +11,8 @@ const STATE_KEY = 'otp.state';   // filters and tab
 // ---------- formatting ----------
 const fmtN = (n) => Math.round(n).toLocaleString('en-US');
 const fmtP = (p, d = 1) => (p == null || !isFinite(p) ? '–' : (p * 100).toFixed(d) + '%');
-const fmt$ = (n) => '$' + Math.round(n).toLocaleString('en-US');
-const fmt$c = (n) => n >= 1e6 ? '$' + (n / 1e6).toFixed(2) + 'M' : n >= 1e3 ? '$' + (n / 1e3).toFixed(1) + 'K' : fmt$(n);
+const fmt$ = (n) => { const r = Math.round(n); return (r < 0 ? '-$' : '$') + Math.abs(r).toLocaleString('en-US'); };
+const fmt$c = (n) => { const a = Math.abs(n), s = n < 0 ? '-$' : '$'; return a >= 1e6 ? s + (a / 1e6).toFixed(2) + 'M' : a >= 1e3 ? s + (a / 1e3).toFixed(1) + 'K' : fmt$(n); };
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const DAY = 86400000;
 // "2026-10-01 10:49" -> "Oct 1, 2026, 10:49 AM"
@@ -58,10 +58,16 @@ const byName = (names) => (a, b) => {
 };
 
 const defaults = () => ({ regions: Array.from({ length: NR }, (_, i) => i), account: -1, csr: -1, cust: -1,
-  from: months[0], to: months[months.length - 1], tab: 'dash', otpMetric: 'gross', csrMetric: 'gross', csrPer: 'week', fcH: 8, fcBasis: 12, revOn: true });
+  from: months[0], to: months[months.length - 1], tab: 'dash', otpMetric: 'gross', csrMetric: 'gross', csrPer: 'week', fcH: 8, fcBasis: 12, revOn: true, revKind: 'net',
+  revBy: 'cust', revShow: 'all', revSort: 'net', revDir: 1, revOpen: '' });
 // Revenue can be hidden everywhere (screens and exports), e.g. when sharing the screen.
 const showRev = () => S.revOn !== false;
-function revUi() { $('#revBtn').textContent = showRev() ? 'Hide revenue' : 'Show revenue'; }
+function revUi() { $('#revBtn').textContent = showRev() ? 'Hide revenue' : 'Show revenue'; $('#tab-rev').hidden = !showRev(); }
+// The money figure on the dashboard (net by default): gross revenue (Total Revenue Charges), gross expense (Total Expense Charges)
+// or net (revenue minus expense). Expense is shown with a minus sign, as money going out.
+// Data files saved before expense was read only have revenue.
+const MONEY = { net: { label: 'Net', of: (o) => o.rev - o.exp }, gross: { label: 'Gross revenue', of: (o) => o.rev }, expense: { label: 'Gross expense', of: (o) => -o.exp } };
+const moneyKind = () => (DATA.hasExp && MONEY[S.revKind] ? S.revKind : 'gross'), money = () => MONEY[moneyKind()];
 const saveState = () => { try { localStorage.setItem(STATE_KEY, JSON.stringify(S)); } catch (e) {} };
 
 function validate(d) {
@@ -89,6 +95,8 @@ function isoWeekKey(y, w) {   // Excel WEEKNUM(,2) year/week -> ISO year*100+wee
 
 function load(d) {
   DATA = validate(d);
+  DATA.hasExp = DATA.pod.every((r) => r.length >= 12);
+  DATA.hasNoRev = DATA.pod.every((r) => r.length >= 14);   // HAWBs with cost but no revenue (added after expense)
   DATA.dims.region = DATA.dims.region.map(regionLabel);
   // Each fact row gets its month key (ym) and week key (wk) once. Stored years/weeks are left as they
   // are, so a saved data file stays in the original numbering and is re-keyed the same way next load.
@@ -154,7 +162,14 @@ function readExcel(files) {
     li.innerHTML = `<div class="pf"><b>${esc(f.name)}</b><span>Waiting</span></div><div class="bar"><i></i></div>`;
     list.append(li); rows.set(f.name, li);
   }
-  const done = new Set(), count = () => { $('#progressCount').innerHTML = `<span class="otp-pcount">${done.size} of ${files.length} file${files.length === 1 ? '' : 's'} done.</span>`; };
+  // Files inside a .zip are only known once the worker opens it, so their rows are added as they appear.
+  const addRow = (name, after) => {
+    const li = document.createElement('li');
+    li.innerHTML = `<div class="pf"><b>${esc(name)}</b><span>Waiting</span></div><div class="bar"><i></i></div>`;
+    if (after) after.after(li); else list.append(li);
+    rows.set(name, li); return li;
+  };
+  const done = new Set(), count = () => { $('#progressCount').innerHTML = `<span class="otp-pcount">${done.size} of ${rows.size} file${rows.size === 1 ? '' : 's'} done.</span>`; };
   count();
   show('progress');
   if (worker) worker.terminate();
@@ -162,7 +177,8 @@ function readExcel(files) {
   worker.onmessage = (e) => {
     const m = e.data;
     if (m.type === 'progress') {
-      const li = rows.get(m.file); if (!li) return;
+      if (m.zip) { let at = rows.get(m.file); for (const n of m.zip) if (!rows.has(n)) at = addRow(n, at); }
+      const li = rows.get(m.file) || addRow(m.file);
       li.querySelector('span').textContent = m.rows != null ? `${fmtN(m.rows)} shipments` : m.stage;
       li.querySelector('i').style.width = m.pct + '%';
       li.classList.toggle('skip', !!m.skipped);
@@ -202,7 +218,7 @@ $('#saveBtn').addEventListener('click', () => {
   document.body.append(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 4000);
 });
-$('#revBtn').addEventListener('click', () => { S.revOn = !showRev(); saveState(); revUi(); render(); });
+$('#revBtn').addEventListener('click', () => { S.revOn = !showRev(); saveState(); revUi(); setTab(S.tab); });
 $('#forgetBtn').addEventListener('click', () => {
   DATA = null; A = null;
   show('start');
@@ -246,7 +262,8 @@ for (const [id, key] of [['#fAccount', 'account'], ['#fCsr', 'csr'], ['#fCust', 
   $(id).addEventListener('change', (e) => { S[key] = +e.target.value; update(); });
 $('#fFrom').addEventListener('change', (e) => { S.from = +e.target.value; if (S.from > S.to) { S.to = S.from; $('#fTo').value = S.to; } update(); });
 $('#fTo').addEventListener('change', (e) => { S.to = +e.target.value; if (S.to < S.from) { S.from = S.to; $('#fFrom').value = S.from; } update(); });
-$('#resetBtn').addEventListener('click', () => { const t = S.tab; S = defaults(); S.tab = t; buildFilters(); update(); });
+$('#resetBtn').addEventListener('click', () => { const t = S.tab, k = S.revKind; S = defaults(); S.tab = t; S.revKind = k; buildFilters(); update(); });
+$('#tiles').addEventListener('change', (e) => { if (e.target.id === 'moneySel') { S.revKind = e.target.value; saveState(); render(); } });
 
 // One-line summary of the filters, shown in a slim bar once the filter panel scrolls off screen.
 function renderMini() {
@@ -269,7 +286,7 @@ if (typeof IntersectionObserver !== 'undefined') {
 
 // ---------- tabs ----------
 function setTab(t) {
-  S.tab = ['dash', 'otp', 'ship', 'csr', 'fc', 'about'].includes(t) ? t : 'dash';
+  S.tab = ['dash', 'otp', 'ship', 'csr', 'fc', 'rev', 'about'].includes(t) && (t !== 'rev' || showRev()) ? t : 'dash';
   document.querySelectorAll('.tab').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === S.tab)));
   document.querySelectorAll('.panel').forEach((p) => (p.hidden = p.id !== 'p-' + S.tab));
   saveState(); render();
@@ -277,7 +294,8 @@ function setTab(t) {
 $('.otp-tabs').addEventListener('click', (e) => { const b = e.target.closest('.tab'); if (b) setTab(b.dataset.tab); });
 
 // ---------- aggregation ----------
-// fact rows: pod   [region, cust, account, csr, year, week, month, hawb, grossLate, netLate, revenue]
+// fact rows: pod   [region, cust, account, csr, year, week, month, hawb, grossLate, netLate, revenue, expense,
+//                   HAWBs with cost but no revenue, expense on those HAWBs]
 //            ship  [region, cust, account, csr, year, week, month, hawb]
 //            delay [region, cust, account, csr, year, week, month, delay, controllable, count]
 const pass = (r) => {
@@ -287,12 +305,12 @@ const pass = (r) => {
 function aggregate() {
   RS = new Set(S.regions);
   const podW = new Map(), shipW = new Map(), delay = new Map(), regP = new Map(), regS = new Map();
-  const tot = { h: 0, gl: 0, nl: 0, rev: 0, shipped: 0 }, podRows = [], shipRows = [];
-  const bump = (m, k) => { let o = m.get(k); if (!o) m.set(k, (o = { h: 0, gl: 0, nl: 0, rev: 0 })); return o; };
+  const tot = { h: 0, gl: 0, nl: 0, rev: 0, exp: 0, shipped: 0 }, podRows = [], shipRows = [];
+  const bump = (m, k) => { let o = m.get(k); if (!o) m.set(k, (o = { h: 0, gl: 0, nl: 0, rev: 0, exp: 0 })); return o; };
   for (const r of DATA.pod) {
     if (!pass(r)) continue;
     podRows.push(r);
-    for (const o of [bump(podW, r.wk), bump(regP, r[0]), tot]) { o.h += r[7]; o.gl += r[8]; o.nl += r[9]; o.rev += r[10]; }
+    for (const o of [bump(podW, r.wk), bump(regP, r[0]), tot]) { o.h += r[7]; o.gl += r[8]; o.nl += r[9]; o.rev += r[10]; o.exp += r[11] || 0; }
   }
   for (const r of DATA.ship) {
     if (!pass(r)) continue;
@@ -445,11 +463,15 @@ function pctCell(p, h, metric) {
 function weekTable() {
   const keys = sortedKeys(A.podW), multi = multiYear(keys), t = A.tot;
   if (!keys.length) { $('#tWeek').innerHTML = emptyMsg('No delivered shipments for these filters.'); return; }
-  const line = (label, w) => `<td>${label}</td><td>${fmtN(w.h)}</td>${showRev() ? `<td>${fmt$(w.rev)}</td>` : ''}<td>${fmtN(w.gl)}</td><td>${fmtN(w.nl)}</td><td>${fmtP(1 - w.gl / w.h)}</td><td>${fmtP(1 - w.nl / w.h, 2)}</td>`;
-  $('#tWeek').innerHTML = `<table><thead><tr><th>POD week</th><th>HAWBs</th>${showRev() ? '<th>Total revenue</th>' : ''}<th>Gross late</th><th>Net late</th><th>On-time gross %</th><th>On-time net %</th></tr></thead><tbody>` +
+  // gross revenue, gross expense and net side by side (expense and net only when the data has it)
+  // (the grand total shows expense with a minus sign, as money going out; net is green when positive, red when negative)
+  const E = DATA.hasExp, netCls = (n) => (n > 0 ? 'net up' : n < 0 ? 'net down' : 'net');
+  const cash = (w, tot) => (showRev() ? `<td class="rev">${fmt$(w.rev)}</td>` + (E ? `<td class="exp">${fmt$(tot ? -w.exp : w.exp)}</td><td class="${netCls(w.rev - w.exp)}">${fmt$(w.rev - w.exp)}</td>` : '') : '');
+  const line = (label, w, tot) => `<td>${label}</td><td>${fmtN(w.h)}</td>${cash(w, tot)}<td>${fmtN(w.gl)}</td><td>${fmtN(w.nl)}</td><td>${fmtP(1 - w.gl / w.h)}</td><td>${fmtP(1 - w.nl / w.h, 2)}</td>`;
+  $('#tWeek').innerHTML = `<table><thead><tr><th>POD week</th><th>HAWBs</th>${showRev() ? '<th>Gross revenue</th>' + (E ? '<th>Gross expense</th><th>Net</th>' : '') : ''}<th>Gross late</th><th>Net late</th><th>On-time gross %</th><th>On-time net %</th></tr></thead><tbody>` +
     keys.slice().reverse().map((k) => k === thisWeek().key ? `<tr class="now">${line(wkLabel(k, multi) + nowTag, A.podW.get(k))}</tr>`
       : `<tr>${line(wkLabel(k, multi) + (isPartial(k) ? partTag : ''), A.podW.get(k))}</tr>`).join('') +
-    `<tr class="total">${line('Grand total', t)}</tr></tbody></table>`;
+    `<tr class="total">${line('Grand total', t, true)}</tr></tbody></table>`;
 }
 
 function regionTable() {
@@ -457,10 +479,10 @@ function regionTable() {
   if (!ids.length) { $('#tRegion').innerHTML = emptyMsg('No data for these filters.'); return; }
   const line = (label, shipped, p) => {
     const g = p.h ? 1 - p.gl / p.h : null;
-    return `<td>${label}</td><td>${fmtN(shipped)}</td><td>${fmtN(p.h)}</td>${showRev() ? `<td>${fmt$c(p.rev)}</td>` : ''}<td>${fmtP(g)}<span class="meter"><b style="width:${((g || 0) * 100).toFixed(1)}%"></b></span></td><td>${p.h ? fmtP(1 - p.nl / p.h, 2) : '–'}</td>`;
+    return `<td>${label}</td><td>${fmtN(shipped)}</td><td>${fmtN(p.h)}</td>${showRev() ? `<td>${fmt$c(money().of(p))}</td>` : ''}<td>${fmtP(g)}<span class="meter"><b style="width:${((g || 0) * 100).toFixed(1)}%"></b></span></td><td>${p.h ? fmtP(1 - p.nl / p.h, 2) : '–'}</td>`;
   };
-  $('#tRegion').innerHTML = `<table><thead><tr><th>Region</th><th>Shipped</th><th>Delivered</th>${showRev() ? '<th>Revenue</th>' : ''}<th>Gross OTP</th><th>Net OTP</th></tr></thead><tbody>` +
-    ids.map((i) => `<tr>${line(esc(dims.region[i]), A.regS.get(i) || 0, A.regP.get(i) || { h: 0, gl: 0, nl: 0, rev: 0 })}</tr>`).join('') +
+  $('#tRegion').innerHTML = `<table><thead><tr><th>Region</th><th>Shipped</th><th>Delivered</th>${showRev() ? `<th>${money().label}</th>` : ''}<th>Gross OTP</th><th>Net OTP</th></tr></thead><tbody>` +
+    ids.map((i) => `<tr>${line(esc(dims.region[i]), A.regS.get(i) || 0, A.regP.get(i) || { h: 0, gl: 0, nl: 0, rev: 0, exp: 0 })}</tr>`).join('') +
     `<tr class="total">${line('Total', A.tot.shipped, A.tot)}</tr></tbody></table>`;
 }
 
@@ -560,13 +582,182 @@ function csrTable() {
     '</tbody></table>';
 }
 
+// ---------- revenue breakdown ----------
+// Net (gross revenue − gross expense) per customer, account, CSR or region, to find where we lose money.
+const REV_BY = { cust: { col: 1, dim: 'cust', one: 'Customer', many: 'customers' }, account: { col: 2, dim: 'account', one: 'Account', many: 'accounts' },
+  csr: { col: 3, dim: 'csr', one: 'CSR', many: 'CSRs' }, region: { col: 0, dim: 'region', one: 'Region', many: 'regions' } };
+const revBy = () => REV_BY[S.revBy] || REV_BY.cust;
+const lower = (by) => (by.one === 'CSR' ? 'CSR' : by.one.toLowerCase());
+function moneyGroups(rows, col) {
+  const m = new Map();
+  for (const r of rows) {
+    const k = r[col]; let o = m.get(k);
+    if (!o) m.set(k, (o = { k, h: 0, rev: 0, exp: 0, nr: 0, nrc: 0, reg: r[0] }));
+    o.h += r[7]; o.rev += r[10]; o.exp += r[11] || 0; o.nr += r[12] || 0; o.nrc += r[13] || 0;
+    if (o.reg !== r[0]) o.reg = -1;
+  }
+  for (const o of m.values()) { o.net = o.rev - o.exp; o.margin = o.rev ? o.net / o.rev : null; o.perH = o.h ? o.net / o.h : 0; }
+  return m;
+}
+function sumGroups(list) {
+  const t = { h: 0, rev: 0, exp: 0, nr: 0, nrc: 0 };
+  for (const o of list) for (const k in t) t[k] += o[k];
+  t.net = t.rev - t.exp; t.margin = t.rev ? t.net / t.rev : null; t.perH = t.h ? t.net / t.h : 0;
+  return t;
+}
+const netCell = (n) => `<td class="${n > 0 ? 'up' : n < 0 ? 'down' : ''}">${fmt$(n)}</td>`;
+const leftRoundedBar = (x, y, w, h, r) => { r = Math.min(r, h / 2, w); return `M${x + w},${y}H${x + r}Q${x},${y} ${x},${y + r}V${y + h - r}Q${x},${y + h} ${x + r},${y + h}H${x + w}Z`; };
+
+function revBreakdown() {
+  choice('#revBy', 'revBy', [['cust', 'Customer'], ['account', 'Account'], ['csr', 'CSR'], ['region', 'Region']]);
+  choice('#revShow', 'revShow', [['all', 'All'], ['loss', 'Losing money'], ['profit', 'Profitable']]);
+  const msg = !showRev() ? 'Revenue is hidden. Use Show revenue at the top to see this breakdown.'
+    : !DATA.hasExp ? 'This data file was saved before expense was read. Load the Excel files again to see the breakdown.' : '';
+  $('#revMsg').hidden = !msg; $('#revMsg').textContent = msg; $('#revBody').hidden = !!msg;
+  if (msg) return;
+  const by = revBy(), names = dims[by.dim], groups = [...moneyGroups(A.podRows, by.col).values()];
+  const q = $('#revSearch').value.trim().toLowerCase();
+  const shown = groups.filter((o) => (!q || String(names[o.k]).toLowerCase().includes(q)) &&
+    (S.revShow === 'loss' ? o.net < 0 : S.revShow === 'profit' ? o.net > 0 : true));
+  revTiles(groups, by);
+  $('#revChartTitle').textContent = S.revShow === 'loss' ? `Every ${lower(by)} losing money` : S.revShow === 'profit' ? `Every profitable ${lower(by)}` : `Biggest losses and gains by ${lower(by)}`;
+  revChart($('#cRev'), shown, by, names);
+  revTable(shown, by, names, q);
+  revDetail(by, names);
+}
+
+function revTiles(groups, by) {
+  const t = sumGroups(groups), loss = groups.filter((o) => o.net < 0), prof = groups.filter((o) => o.net > 0);
+  const lossNet = loss.reduce((s, o) => s + o.net, 0), profNet = prof.reduce((s, o) => s + o.net, 0);
+  const tile = (label, v, d, neg) => `<div class="ktile"><div class="eyebrow">${label}</div><div class="v${neg ? ' neg' : ''}">${v}</div>${d ? `<div class="d">${d}</div>` : ''}</div>`;
+  $('#revTiles').innerHTML =
+    tile('Net', fmt$c(t.net), `${t.rev ? fmtP(t.margin) + ' margin · ' : ''}${fmt$(t.perH)} per HAWB`, t.net < 0) +
+    tile('Gross revenue', fmt$c(t.rev), 'on delivered HAWBs') +
+    tile('Gross expense', fmt$c(-t.exp), 'on delivered HAWBs', t.exp > 0) +
+    tile(`${by.many} losing money`, `${fmtN(loss.length)} of ${fmtN(groups.length)}`, `${fmt$c(lossNet)} net between them`, loss.length > 0) +
+    tile(`${by.many} profitable`, `${fmtN(prof.length)} of ${fmtN(groups.length)}`, `${fmt$c(profNet)} net between them`) +
+    (DATA.hasNoRev ? tile('Cost with no revenue', fmt$c(-t.nrc), `${plural(t.nr, 'HAWB')} (${fmtP(t.h ? t.nr / t.h : null)} of delivered)`, t.nrc > 0) : '');
+}
+
+// Diverging bars: the biggest losses (red, left of $0) and the biggest gains (green, right of $0).
+function revChart(el, list, by, names) {
+  el.innerHTML = '';
+  // All: the 10 biggest each way. Losing money / Profitable: every one of them.
+  const N = S.revShow === 'all' ? 10 : Infinity, losers = list.filter((o) => o.net < 0).sort((a, b) => a.net - b.net).slice(0, N);
+  const winners = list.filter((o) => o.net > 0).sort((a, b) => b.net - a.net).slice(0, N);
+  const items = [...losers, ...winners];
+  if (!items.length) { el.innerHTML = emptyMsg(`No ${by.many} with a profit or loss for these filters.`); return; }
+  const c = T(), good = css('--good'), crit = css('--crit');
+  const W = el.clientWidth || 600, rowH = 24, gap = losers.length && winners.length ? 22 : 0, mt = 22, lw = Math.min(230, Math.max(110, W * 0.3)), pad = 70;
+  const H = mt + items.length * rowH + gap + 4, lo = Math.min(0, ...items.map((o) => o.net)), hi = Math.max(0, ...items.map((o) => o.net));
+  const iw = Math.max(40, W - lw - 2 * pad), sx = iw / (hi - lo || 1), x0 = lw + pad - lo * sx, maxChars = Math.floor(lw / 6.4);
+  const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, height: H, role: 'img', 'aria-label': `Biggest losses and gains by ${lower(by)}` }, el);
+  const group = (txt, y) => { svgEl('text', { x: lw - 8, y, 'text-anchor': 'end', 'font-size': 11, 'font-weight': 600, fill: c.muted }, svg).textContent = txt; };
+  const what = S.revShow === 'all' ? 'Top' : 'All';
+  if (losers.length) group(`${what} ${losers.length} losses`, 13);
+  if (winners.length) group(`${what} ${winners.length} gains`, losers.length ? mt + losers.length * rowH + gap - 6 : 13);
+  svgEl('line', { x1: x0, x2: x0, y1: mt - 4, y2: H - 2, stroke: c.axis, 'stroke-width': 1 }, svg);
+  svgEl('text', { x: x0, y: 13, 'text-anchor': 'middle', 'font-size': 11, fill: c.muted }, svg).textContent = '$0';
+  items.forEach((o, i) => {
+    const y = mt + i * rowH + (i >= losers.length ? gap : 0), bh = 14, top = y + (rowH - bh) / 2, w = Math.max(1.5, Math.abs(o.net) * sx);
+    const name = String(names[o.k]);
+    svgEl('text', { x: lw - 8, y: top + 11, 'text-anchor': 'end', 'font-size': 12, fill: c.ink2 }, svg).textContent = name.length > maxChars ? name.slice(0, maxChars - 1) + '…' : name;
+    if (o.net < 0) svgEl('path', { d: leftRoundedBar(x0 - w, top, w, bh, 4), fill: crit }, svg);
+    else svgEl('path', { d: rightRoundedBar(x0, top, w, bh, 4), fill: good }, svg);
+    svgEl('text', { x: o.net < 0 ? x0 - w - 6 : x0 + w + 6, y: top + 11, 'text-anchor': o.net < 0 ? 'end' : 'start', 'font-size': 12, 'font-weight': 600, fill: c.ink }, svg).textContent = fmt$c(o.net);
+    const hit = svgEl('rect', { x: 0, y, width: W, height: rowH, fill: 'transparent', style: 'cursor:pointer' }, svg);
+    hit.addEventListener('mousemove', (ev) => showTip(revTip(name, o), ev));
+    hit.addEventListener('mouseleave', hideTip);
+    hit.addEventListener('click', () => { hideTip(); openRev(o.k); });
+  });
+}
+const revTip = (name, o) => `<div class="tt">${esc(name)}</div>` + row('HAWBs delivered', fmtN(o.h)) + row('Gross revenue', fmt$(o.rev)) + row('Gross expense', fmt$(-o.exp)) +
+  row('Net', fmt$(o.net)) + row('Margin', fmtP(o.margin)) + row('Net per HAWB', fmt$(o.perH)) + (DATA.hasNoRev ? row('HAWBs with cost, no revenue', fmtN(o.nr)) : '') +
+  '<div class="tnote">Click for the detail</div>';
+function openRev(k) {
+  const key = S.revBy + ':' + k;
+  S.revOpen = S.revOpen === key ? '' : key; saveState(); render();
+  if (S.revOpen) $('#revDetail').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+const REV_COLS = [['name', ''], ['h', 'HAWBs'], ['rev', 'Gross revenue'], ['exp', 'Gross expense'], ['net', 'Net'], ['margin', 'Margin'], ['perH', 'Net per HAWB'],
+  ['nr', 'HAWBs with cost, no revenue'], ['nrc', 'Cost with no revenue']];
+function revTable(list, by, names, q) {
+  const el = $('#tRev'), nr = DATA.hasNoRev, cols = REV_COLS.filter(([k]) => nr || (k !== 'nr' && k !== 'nrc'));
+  $('#revTableTitle').textContent = `Net by ${lower(by)}`;
+  if (!list.length) { el.innerHTML = emptyMsg('Nothing matches these filters.'); $('#tRevMore').innerHTML = ''; return; }
+  const key = cols.some(([k]) => k === S.revSort) ? S.revSort : 'net', dir = S.revDir === -1 ? -1 : 1, nameCmp = byName(names);
+  const val = (o) => (o[key] == null ? -Infinity : o[key]);
+  list.sort((a, b) => (key === 'name' ? nameCmp(a.k, b.k) : val(a) - val(b)) * dir || nameCmp(a.k, b.k));
+  const showRegion = RS.size > 1 && by.col !== 0;
+  const head = cols.map(([k, l]) => `<th data-sort="${k}" class="sortable" title="Sort">${k === 'name' ? by.one : l}${k === key ? (dir === 1 ? ' ▲' : ' ▼') : ''}</th>`).join('');
+  const line = (label, o) => `<td>${label}</td><td>${fmtN(o.h)}</td><td class="rev">${fmt$(o.rev)}</td><td class="exp">${fmt$(-o.exp)}</td>${netCell(o.net)}` +
+    `<td>${fmtP(o.margin)}</td><td>${fmt$(o.perH)}</td>` + (nr ? `<td>${o.nr ? fmtN(o.nr) : ''}</td><td class="${o.nrc ? 'exp' : ''}">${o.nrc ? fmt$(-o.nrc) : ''}</td>` : '');
+  const open = S.revOpen.startsWith(S.revBy + ':') ? +S.revOpen.split(':')[1] : null;
+  el.innerHTML = `<table class="rv"><thead><tr>${head}</tr></thead><tbody>` +
+    list.map((o) => {
+      const n = esc(names[o.k]), tag = showRegion && o.reg >= 0 ? `<span class="rtag">${esc(dims.region[o.reg])}</span>` : '';
+      return `<tr data-k="${o.k}"${o.k === open ? ' class="sel"' : ''}>${line(`<span title="${n}">${n}</span>${tag}`, o)}</tr>`;
+    }).join('') +
+    `<tr class="total">${line('Total', sumGroups(list))}</tr></tbody></table>`;
+  el.onclick = (ev) => {
+    const th = ev.target.closest('th[data-sort]');
+    if (th) {
+      const k = th.dataset.sort;
+      if (key === k) S.revDir = -dir;
+      else { S.revSort = k; S.revDir = ['name', 'net', 'margin', 'perH'].includes(k) ? 1 : -1; }   // losses first; biggest first for amounts
+      saveState(); render(); return;
+    }
+    const tr = ev.target.closest('tr[data-k]'); if (tr) openRev(+tr.dataset.k);
+  };
+  const loss = list.filter((o) => o.net < 0).length;
+  $('#tRevMore').innerHTML = `<span class="note">${plural(list.length, lower(by))}${q ? ' matching your search' : ''}, ${fmtN(loss)} losing money. ` +
+    `Expense is shown as money going out, with a minus sign.${nr ? ' Cost with no revenue is expense on HAWBs that carry no revenue at all, often billing that has not posted yet.' : ''}</span>`;
+}
+
+// Detail for the clicked row: net by POD month, and what drives it one level down.
+function revDetail(by, names) {
+  const card = $('#revDetail'), [b, ks] = S.revOpen.split(':'), k = +ks;
+  const rows = b === S.revBy ? A.podRows.filter((r) => r[by.col] === k) : [];
+  if (!rows.length) { card.hidden = true; card.innerHTML = ''; return; }
+  const sub = by.col === 1 ? REV_BY.csr : REV_BY.cust, t = sumGroups(rows.length ? [...moneyGroups(rows, by.col).values()] : []);
+  const months = [...moneyGroups(rows.map((r) => { const x = r.slice(); x[0] = r.ym; return x; }), 0).values()].sort((a, b) => a.k - b.k);
+  const parts = [...moneyGroups(rows, sub.col).values()].sort((a, b) => a.net - b.net);
+  const nr = DATA.hasNoRev, hdr = `<th>HAWBs</th><th>Gross revenue</th><th>Gross expense</th><th>Net</th><th>Margin</th>${nr ? '<th>No-revenue HAWBs</th>' : ''}`;
+  const cells = (o) => `<td>${fmtN(o.h)}</td><td class="rev">${fmt$(o.rev)}</td><td class="exp">${fmt$(-o.exp)}</td>${netCell(o.net)}<td>${fmtP(o.margin)}</td>${nr ? `<td>${o.nr ? fmtN(o.nr) : ''}</td>` : ''}`;
+  const TOP = 15, worst = months.filter((o) => o.net < 0).sort((a, b) => a.net - b.net)[0];
+  const why = [t.net < 0 ? `lost ${fmt$(-t.net)} on ${plural(t.h, 'delivered HAWB')}` : `made ${fmt$(t.net)} on ${plural(t.h, 'delivered HAWB')}`];
+  if (nr && t.nr) why.push(`${plural(t.nr, 'HAWB')} carried ${fmt$(t.nrc)} of cost with no revenue`);
+  if (worst) why.push(`the worst month was ${ymLabel(worst.k)} at ${fmt$(worst.net)}`);
+  card.hidden = false;
+  card.innerHTML = `<div class="card-h"><h2>${esc(names[k])}</h2><span class="sub">${by.one} detail <button class="otp-linkbtn" type="button" id="revClose">Close</button></span></div>
+    <p class="fc-note">In the selected period this ${lower(by)} ${why.join('; ')}.</p>
+    <div class="grid2">
+      <div class="rv-part"><h3>By POD month</h3><div class="tscroll"><table class="rv"><thead><tr><th>Month</th>${hdr}</tr></thead><tbody>
+        ${months.map((o) => `<tr><td>${ymLabel(o.k)}</td>${cells(o)}</tr>`).join('')}<tr class="total"><td>Total</td>${cells(t)}</tr></tbody></table></div></div>
+      <div class="rv-part"><h3>By ${lower(sub)}, biggest losses first</h3><div class="tscroll"><table class="rv"><thead><tr><th>${sub.one}</th>${hdr}</tr></thead><tbody>
+        ${parts.slice(0, TOP).map((o) => { const n = esc(dims[sub.dim][o.k]); return `<tr><td title="${n}">${n}</td>${cells(o)}</tr>`; }).join('')}
+        ${parts.length > TOP ? `<tr><td class="rng">and ${parts.length - TOP} more</td>${'<td></td>'.repeat(nr ? 6 : 5)}</tr>` : ''}</tbody></table></div></div>
+    </div>`;
+  $('#revClose').onclick = () => { S.revOpen = ''; saveState(); render(); };
+}
+
+const moneyNote = (t) => moneyKind() === 'net' ? (t.rev ? fmtP((t.rev - t.exp) / t.rev) + ' of gross revenue' : 'on delivered HAWBs') : 'on delivered HAWBs';
+function moneyTile(t) {
+  const k = moneyKind(), opt = (v) => `<option value="${v}"${v === k ? ' selected' : ''}>${MONEY[v].label}</option>`;
+  const head = DATA.hasExp ? `<select id="moneySel" class="tile-sel eyebrow" aria-label="Money figure">${Object.keys(MONEY).map(opt).join('')}</select>`
+    : `<div class="eyebrow" title="This data file has no expense; load the Excel files again to see expense and net">${MONEY.gross.label}</div>`;
+  const v = money().of(t);
+  return `<div class="ktile">${head}<div class="v${v < 0 ? ' neg' : ''}">${fmt$c(v)}</div><div class="d">${moneyNote(t)}</div></div>`;
+}
+
 function tiles() {
   const t = A.tot, g = t.h ? 1 - t.gl / t.h : null, n = t.h ? 1 - t.nl / t.h : null;
   const tile = (label, v, d) => `<div class="ktile"><div class="eyebrow">${label}</div><div class="v">${v}</div>${d ? `<div class="d">${d}</div>` : ''}</div>`;
   $('#tiles').innerHTML =
     tile('HAWBs shipped', fmtN(t.shipped), 'by ship date in period') +
     tile('HAWBs delivered', fmtN(t.h), 'with a POD in period') +
-    (showRev() ? tile('Total revenue', fmt$c(t.rev), 'on delivered HAWBs') : '') +
+    (showRev() ? moneyTile(t) : '') +
     tile('On-time gross', fmtP(g), `${fmtN(t.gl)} gross late`) +
     tile('On-time net', fmtP(n, 2), `<span class="pill ${t.nl ? 'bad' : 'ok'}">${fmtN(t.nl)} controllable late</span>`) +
     tile('Late, uncontrollable', fmtN(t.gl - t.nl), t.gl ? fmtP((t.gl - t.nl) / t.gl) + ' of gross late' : '');
@@ -602,6 +793,8 @@ function about() {
       <li><b>Weeks</b> follow <code>WEEKNUM(date, 2)</code> (weeks start Monday) and are kept apart by year, so W50 ’25 sorts before W1 ’26.
         <b>COSTCO+ and AMAZON</b> use ISO weeks, like their OTP summaries: week 1 is the full week containing Jan 1, so Dec 29, 2025 – Jan 4, 2026 is W1 ’26 for those regions.</li>
       <li><b>CSR and Account</b> come from the value on each row, which keeps CSR history. Rows without a value use the CSR tab lookup.</li>
+      <li><b>Gross revenue</b> = <code>Total Revenue Charges</code>, <b>Gross expense</b> = <code>Total Expense Charges</code>, and <b>Net</b> = gross revenue − gross expense, summed over delivered HAWBs (rows with a POD and an on-time result). Pick which one the dashboard shows from the drop-down on its tile.</li>
+      <li><b>Revenue breakdown</b> totals the same figures per customer, account, CSR or region. <b>Cost with no revenue</b> is expense on delivered HAWBs whose revenue is $0 or less, often billing that has not posted yet. <b>Margin</b> = net ÷ gross revenue.</li>
       <li>Delivery views (OTP, delay codes, revenue) filter by POD month; shipment counts filter by ship month, matching the Excel pivots.</li>
     </ul>
     <h2>How projections work</h2>
@@ -931,18 +1124,26 @@ async function exportExcel() {
     add('OTP by CSR', stackBlocks([['BY MONTH', otpBlock(A.podRows, 3, 'month', 'CSR')], ['BY WEEK', otpBlock(A.podRows, 3, 'week', 'CSR')]]), 26);
     // dashboard tables
     const wkKeys = sortedKeys(A.podW), multi = multiYear(wkKeys);
-    const R = showRev(), only = (x) => (R ? [x] : []);
-    const line = (label, w) => [label, x0(w.h), ...only(x0(w.rev, '$#,##0')), x0(w.gl), x0(w.nl), xP(1 - w.gl / w.h), xP(1 - w.nl / w.h, '0.00%')];
-    add('Weekly Summary', { aoa: [['POD week', 'HAWBs', ...only('Total revenue'), 'Gross late', 'Net late', 'On-time gross %', 'On-time net %'],
+    const R = showRev(), E = R && DATA.hasExp, only = (x) => (R ? [x] : []), onlyE = (...x) => (E ? x : []);
+    const cash = (w) => [...only(x0(w.rev, '$#,##0')), ...onlyE(x0(w.exp, '$#,##0'), x0(w.rev - w.exp, '$#,##0'))];
+    const cashH = [...only('Gross revenue'), ...onlyE('Gross expense', 'Net')];
+    const line = (label, w) => [label, x0(w.h), ...cash(w), x0(w.gl), x0(w.nl), xP(1 - w.gl / w.h), xP(1 - w.nl / w.h, '0.00%')];
+    add('Weekly Summary', { aoa: [['POD week', 'HAWBs', ...cashH, 'Gross late', 'Net late', 'On-time gross %', 'On-time net %'],
       ...wkKeys.map((k) => line(xWeek(k, multi), A.podW.get(k))), ...(A.tot.h ? [line('Grand total', A.tot)] : [])], merges: [] }, 14);
-    const regIds = [...new Set([...A.regP.keys(), ...A.regS.keys()])].sort((a, b) => a - b), none = { h: 0, gl: 0, nl: 0, rev: 0 };
-    const rline = (label, s, p) => [label, x0(s), x0(p.h), ...only(x0(p.rev, '$#,##0')), p.h ? xP(1 - p.gl / p.h) : '', p.h ? xP(1 - p.nl / p.h, '0.00%') : ''];
-    add('By Region', { aoa: [['Region', 'Shipped', 'Delivered', ...only('Revenue'), 'Gross OTP', 'Net OTP'],
+    const regIds = [...new Set([...A.regP.keys(), ...A.regS.keys()])].sort((a, b) => a - b), none = { h: 0, gl: 0, nl: 0, rev: 0, exp: 0 };
+    const rline = (label, s, p) => [label, x0(s), x0(p.h), ...cash(p), p.h ? xP(1 - p.gl / p.h) : '', p.h ? xP(1 - p.nl / p.h, '0.00%') : ''];
+    add('By Region', { aoa: [['Region', 'Shipped', 'Delivered', ...cashH, 'Gross OTP', 'Net OTP'],
       ...regIds.map((i) => rline(dims.region[i], A.regS.get(i) || 0, A.regP.get(i) || none)), rline('Total', A.tot.shipped, A.tot)], merges: [] }, 16);
     const late = [...A.delay.entries()].map(([k, v]) => [dims.delay[k], v[0], v[1]]).sort((a, b) => b[1] + b[2] - a[1] - a[2]);
     const lateTot = late.reduce((s, x) => s + x[1] + x[2], 0);
     add('Delay Codes', { aoa: [['Delay code (late shipments)', 'Late HAWBs', 'Controllable', 'Uncontrollable', 'Share of late'],
       ...late.map(([n, c, u]) => [n, x0(c + u), x0(c), x0(u), xP(lateTot ? (c + u) / lateTot : null)])], merges: [] }, 34);
+    if (E) {   // net by customer, biggest losses first
+      const nr = DATA.hasNoRev, cg = [...moneyGroups(A.podRows, 1).values()].sort((a, b) => a.net - b.net), m$ = (v) => x0(v, '$#,##0;-$#,##0');
+      const cline = (name, reg, o) => [name, reg, x0(o.h), m$(o.rev), m$(-o.exp), m$(o.net), xP(o.margin), m$(o.perH), ...(nr ? [x0(o.nr), m$(-o.nrc)] : [])];
+      add('Revenue by Customer', { aoa: [['Customer', 'Region', 'HAWBs', 'Gross revenue', 'Gross expense', 'Net', 'Margin', 'Net per HAWB', ...(nr ? ['HAWBs with cost, no revenue', 'Cost with no revenue'] : [])],
+        ...cg.map((o) => cline(dims.cust[o.k], o.reg >= 0 ? dims.region[o.reg] : 'Several', o)), cline('Total', '', sumGroups(cg))], merges: [] }, 34);
+    }
     XLSX.writeFile(wb, exportName());
     btn.textContent = 'Downloaded';
   } catch (err) {
@@ -1268,7 +1469,7 @@ async function exportPpt() {
         ['Controllable late', fmtN(t.nl), `${pctTxt(t.h ? t.nl / t.h : null, 2)} of deliveries`, null],
         ['HAWBs shipped', fmtN(t.shipped), 'by ship date', null],
         ['HAWBs delivered', fmtN(t.h), 'with a POD', null],
-        showRev() ? ['Revenue', fmt$c(t.rev), 'on delivered HAWBs', null] : ['Gross late', fmtN(t.gl), 'missed the adjusted due date', null],
+        showRev() ? [money().label, fmt$c(money().of(t)), moneyNote(t), null] : ['Gross late', fmtN(t.gl), 'missed the adjusted due date', null],
       ];
       const tw3 = (CW - 2 * 0.45) / 3;
       tiles.forEach(([lab, val, note, d], i) => {
@@ -1471,11 +1672,13 @@ function render() {
     matrix('#mCsrOtp', null, A.podRows, 3, 'otp', { metric: S.csrMetric });
   }
   if (S.tab === 'fc') projections();
+  if (S.tab === 'rev') revBreakdown();
   if (S.tab === 'about') about();
 }
 function update() { saveState(); aggregate(); renderMini(); render(); }
 $('#otpSearch').addEventListener('input', render);
 $('#shipSearch').addEventListener('input', render);
+$('#revSearch').addEventListener('input', render);
 let rz, lastW = 0;
 new ResizeObserver((en) => { const w = Math.round(en[0].contentRect.width); if (w === lastW) return; lastW = w; clearTimeout(rz); rz = setTimeout(render, 120); }).observe($('#app'));
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', render);

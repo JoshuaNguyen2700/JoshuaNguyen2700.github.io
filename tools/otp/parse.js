@@ -5,9 +5,9 @@
 // .xlsx sheets are XML; .xlsb sheets are Excel's binary records (BIFF12), read by the "xlsb" section below.
 // Mirrors build_otp_dashboard.py; runs in a Web Worker (worker.js) and also under Node for testing.
 
-const NEEDED_BASE = { cust: 1, custName: 2, ship: 3, transit: 6, origZone: 8, destZone: 10, pod: 28, defect: 33, exception: 34, revenue: 53 };
+const NEEDED_BASE = { cust: 1, custName: 2, ship: 3, transit: 6, origZone: 8, destZone: 10, pod: 28, defect: 33, exception: 34, revenue: 53, expense: 54 };
 const EXPECTED = { 0: 'HAWB Number', 1: 'Customer', 2: "Customer's Name", 3: 'Ship Date (8A)', 6: 'Transit Time', 8: 'Origin Zone',
-  10: 'Destination Zone', 28: 'Delivery Date (8A)', 33: 'Defect Code', 34: 'Exception/Comments', 53: 'Total Revenue Charges' };
+  10: 'Destination Zone', 28: 'Delivery Date (8A)', 33: 'Defect Code', 34: 'Exception/Comments', 53: 'Total Revenue Charges', 54: 'Total Expense Charges' };
 const ZONES_OK = new Set(['A', 'B', 'C', 'D', 'E']);
 const DAY = 86400000, EPOCH = Date.UTC(1899, 11, 30);
 
@@ -73,7 +73,9 @@ export async function listZip(blob) {
       if (csize === 0xFFFFFFFF) { csize = Number(cv.getBigUint64(y, true)); y += 8; }
       if (off === 0xFFFFFFFF) off = Number(cv.getBigUint64(y, true));
     }
-    entries.set(name, { method, csize, usize, off });
+    const dd = cv.getUint16(q + 14, true), dt = cv.getUint16(q + 12, true);   // DOS date/time
+    const mtime = new Date(1980 + (dd >> 9), ((dd >> 5) & 15) - 1, dd & 31, dt >> 11, (dt >> 5) & 63, (dt & 31) * 2).getTime();
+    entries.set(name, { method, csize, usize, off, mtime });
     q += 46 + nlen + xlen + clen;
   }
   return entries;
@@ -429,11 +431,13 @@ async function processWorkbook(file, agg, progress) {
     const delay = status === 'On-Time' ? 'On-Time' : (exc || 'Missing Delay Code');
     const netLate = status === 'Late' && carrier === 'Controllable';
     const rv = raw('revenue', i), rev = typeof rv === 'number' ? rv : 0;
+    // The export stores expense as a negative amount (-104.02 against 160.46 revenue); flip it so expense is a cost.
+    const ev = raw('expense', i), exp = typeof ev === 'number' ? -ev : 0;
     const cOn = str(raw('c_onTime', i));
     if ((cOn === 'On-Time' || cOn === 'Late' || cOn === 'No Pod Yet') && cOn !== status) bump(mism, 'On-Time');
     const cNet = raw('c_netLate', i);
     if (typeof cNet === 'number' && Boolean(cNet) !== netLate) bump(mism, 'Net_Late');
-    agg.add(region, str(raw('custName', i)).trim() || cust, account, csr, ship, pod, status, delay, carrier === 'Controllable', netLate, rev);
+    agg.add(region, str(raw('custName', i)).trim() || cust, account, csr, ship, pod, status, delay, carrier === 'Controllable', netLate, rev, exp);
     rows++;
   }
   progress({ file: name, stage: 'Done', pct: 100, rows });
@@ -444,13 +448,14 @@ async function processWorkbook(file, agg, progress) {
 class Aggregator {
   constructor() { this.dims = { region: new Map(), cust: new Map(), account: new Map(), csr: new Map(), delay: new Map() }; this.pod = new Map(); this.ship = new Map(); this.delay = new Map(); }
   di(kind, v) { const d = this.dims[kind]; let i = d.get(v); if (i === undefined) { i = d.size; d.set(v, i); } return i; }
-  add(region, cust, account, csr, ship, pod, status, delay, controllable, netLate, rev) {
+  add(region, cust, account, csr, ship, pod, status, delay, controllable, netLate, rev, exp) {
     const base = [this.di('region', region), this.di('cust', cust), this.di('account', account), this.di('csr', csr)];
     if (ship != null) { const p = parts(ship), k = [...base, p.year, p.week, p.month].join(','); this.ship.set(k, (this.ship.get(k) || 0) + 1); }
     if (pod != null && (status === 'On-Time' || status === 'Late')) {
       const p = parts(pod), k = [...base, p.year, p.week, p.month].join(',');
-      let a = this.pod.get(k); if (!a) this.pod.set(k, (a = [0, 0, 0, 0]));
-      a[0]++; if (status === 'Late') a[1]++; if (netLate) a[2]++; a[3] += rev;
+      let a = this.pod.get(k); if (!a) this.pod.set(k, (a = [0, 0, 0, 0, 0, 0, 0]));
+      a[0]++; if (status === 'Late') a[1]++; if (netLate) a[2]++; a[3] += rev; a[4] += exp;
+      if (rev <= 0 && exp > 0) { a[5]++; a[6] += exp; }   // cost with no revenue on the HAWB
       if (status === 'Late') { const dk = k + ',' + this.di('delay', delay) + ',' + (controllable ? 1 : 0); this.delay.set(dk, (this.delay.get(dk) || 0) + 1); }
     }
   }
@@ -459,7 +464,7 @@ class Aggregator {
     const nm = Object.fromEntries(Object.entries(o.dims).map(([k, m]) => [k, [...m.keys()]]));
     const re = (k) => { const a = k.split(','); ['region', 'cust', 'account', 'csr'].forEach((d, i) => { a[i] = this.di(d, nm[d][+a[i]]); }); return a; };
     for (const [k, n] of o.ship) { const nk = re(k).join(','); this.ship.set(nk, (this.ship.get(nk) || 0) + n); }
-    for (const [k, v] of o.pod) { const nk = re(k).join(','); let t = this.pod.get(nk); if (!t) this.pod.set(nk, (t = [0, 0, 0, 0])); for (let i = 0; i < 4; i++) t[i] += v[i]; }
+    for (const [k, v] of o.pod) { const nk = re(k).join(','); let t = this.pod.get(nk); if (!t) this.pod.set(nk, (t = [0, 0, 0, 0, 0, 0, 0])); for (let i = 0; i < 7; i++) t[i] += v[i]; }
     for (const [k, n] of o.delay) { const a = re(k); a[7] = this.di('delay', nm.delay[+a[7]]); const nk = a.join(','); this.delay.set(nk, (this.delay.get(nk) || 0) + n); }
   }
   result(sources, checks) {
@@ -468,7 +473,7 @@ class Aggregator {
       generated: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`,
       sources, checks,
       dims: Object.fromEntries(Object.entries(this.dims).map(([k, m]) => [k, [...m.keys()]])),
-      pod: [...this.pod].map(([k, a]) => [...keys(k), a[0], a[1], a[2], Math.round(a[3] * 100) / 100]),
+      pod: [...this.pod].map(([k, a]) => [...keys(k), a[0], a[1], a[2], Math.round(a[3] * 100) / 100, Math.round(a[4] * 100) / 100, a[5], Math.round(a[6] * 100) / 100]),
       ship: [...this.ship].map(([k, n]) => [...keys(k), n]),
       delay: [...this.delay].map(([k, n]) => [...keys(k), n]),
     };
@@ -476,12 +481,49 @@ class Aggregator {
 }
 
 // files: File/Blob objects with .name. progress({file, stage, pct}) is called as work advances.
+// A .zip of exports: list the .xlsx/.xlsb files inside (any folder). Each one is unpacked only when its turn
+// comes, so a zip of several 100+ MB exports never sits in memory all at once.
+async function zipContents(zip, progress) {
+  const out = [];
+  for (const [path, e] of await listZip(zip)) {
+    const base = path.split('/').pop();
+    if (!/\.xls[xb]$/i.test(base) || base.startsWith('~$') || path.startsWith('__MACOSX/')) continue;
+    out.push({ name: base, lastModified: e.mtime || zip.lastModified, fromZip: zip.name, open: async () => {
+      progress({ file: base, stage: 'Unzipping', pct: 1 });
+      const blob = e.method === 0 ? zip.slice(...await entryRange(zip, e)) : await new Response(await entryReader(zip, e, null, true).then((r) => new ReadableStream({
+        async pull(c) { const { value, done } = await r.read(); if (done) c.close(); else c.enqueue(value); } }))).blob();
+      return new File([blob], base, { lastModified: e.mtime || zip.lastModified });
+    } });
+  }
+  return out;
+}
+async function entryRange(blob, e) {
+  const lh = new DataView((await bytes(blob, e.off, e.off + 30)).buffer), start = e.off + 30 + lh.getUint16(26, true) + lh.getUint16(28, true);
+  return [start, start + e.csize];
+}
+
 export async function buildFromFiles(files, progress = () => {}) {
   const agg = new Aggregator(), checks = {}, sources = [], skipped = [], best = new Map();
+  // Zips are opened first and replaced by the Excel files inside them.
+  const list = [];
   for (const f of files) {
-    if (!/\.xls[xb]$/i.test(f.name)) { skipped.push({ file: f.name, reason: 'is not an .xlsx or .xlsb file' }); progress({ file: f.name, stage: 'Skipped: not an .xlsx or .xlsb file', pct: 100, skipped: true }); continue; }
+    if (!/\.zip$/i.test(f.name)) { list.push(f); continue; }
     try {
-      const a = new Aggregator(), r = await processWorkbook(f, a, progress);
+      const inner = await zipContents(f, progress);
+      progress({ file: f.name, stage: inner.length ? `Unzipped: ${inner.map((x) => x.name).join(', ')}` : 'Skipped: no .xlsx or .xlsb files inside', pct: 100, skipped: !inner.length, zip: inner.map((x) => x.name) });
+      if (!inner.length) skipped.push({ file: f.name, reason: 'has no .xlsx or .xlsb files inside' });
+      list.push(...inner);
+    } catch (e) {
+      skipped.push({ file: f.name, reason: 'could not be opened as a zip file' });
+      progress({ file: f.name, stage: 'Skipped: could not be opened as a zip file', pct: 100, skipped: true });
+    }
+  }
+  for (const item of list) {
+    if (!/\.xls[xb]$/i.test(item.name)) { skipped.push({ file: item.name, reason: 'is not an .xlsx, .xlsb or .zip file' }); progress({ file: item.name, stage: 'Skipped: not an .xlsx, .xlsb or .zip file', pct: 100, skipped: true }); continue; }
+    // only the name and date are kept afterwards, so an unzipped file can be freed once it has been read
+    const f = { name: item.name, lastModified: item.lastModified };
+    try {
+      const a = new Aggregator(), r = await processWorkbook(item.open ? await item.open() : item, a, progress);
       // Two files for the same region (e.g. last week's and this week's export) would double count, so only
       // the one with the latest shipments is used (if equal, the more recently saved file).
       const prev = best.get(r.region);

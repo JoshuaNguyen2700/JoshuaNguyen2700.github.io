@@ -18,12 +18,12 @@
   <section class="hero otp-start" id="start">
     <div class="eyebrow">Upload this week's regional exports</div>
     <h1>OTP Dashboard</h1>
-    <p>Weekly on-time delivery by region, customer and CSR. Choose your regional Excel exports (.xlsx or .xlsb) to begin.</p>
+    <p>Weekly on-time delivery by region, customer and CSR. Choose your regional Excel exports (.xlsx or .xlsb, or a .zip of them) to begin.</p>
     <div class="actions">
       <label class="btn" for="xlsxInput">Choose Excel files</label>
       <label class="link" for="fileInput">Open a saved data file</label>
     </div>
-    <div class="otp-drop" id="drop">or drop the .xlsx / .xlsb files here. Pick several at once to see every region together.</div>
+    <div class="otp-drop" id="drop">or drop the .xlsx / .xlsb files, or a .zip of them, here. Pick several at once to see every region together.</div>
     <p class="otp-privacy">Your files stay on this computer. The browser reads them directly and nothing is sent anywhere.</p>
     <p class="otp-error" id="startError" role="alert" hidden></p>
   </section>
@@ -35,7 +35,7 @@
     <ul id="progressList"></ul>
     <button class="otp-linkbtn" id="cancelBtn" type="button">Cancel</button>
   </section>
-  <input type="file" id="xlsxInput" accept=".xlsx,.xlsb,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.binary.macroEnabled.12" multiple hidden>
+  <input type="file" id="xlsxInput" accept=".xlsx,.xlsb,.zip,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.binary.macroEnabled.12,application/zip,application/x-zip-compressed" multiple hidden>
   <input type="file" id="fileInput" accept=".json,application/json" hidden>
 
   <div class="otp" id="app" hidden>
@@ -86,6 +86,7 @@
       <button class="tab" role="tab" id="tab-ship" data-tab="ship">Shipments by week</button>
       <button class="tab" role="tab" id="tab-csr" data-tab="csr">CSR</button>
       <button class="tab" role="tab" id="tab-fc" data-tab="fc">Projections</button>
+      <button class="tab" role="tab" id="tab-rev" data-tab="rev">Revenue breakdown</button>
       <button class="tab" role="tab" id="tab-about" data-tab="about">How it's calculated</button>
     </nav>
 
@@ -194,6 +195,32 @@
       <div class="card">
         <div class="card-h"><h2>Projected weeks</h2><span class="sub">likely range under each figure</span><button class="otp-linkbtn copybtn" type="button" data-copy="#fcTable" title="Copy this table, then paste into Excel">Copy</button></div>
         <div class="tscroll" id="fcTable"></div>
+      </div>
+    </section>
+
+    <section class="panel" id="p-rev" role="tabpanel" aria-labelledby="tab-rev" hidden>
+      <div class="card">
+        <div class="card-h"><h2>Revenue breakdown</h2><span class="sub">where we make and lose money on delivered HAWBs; uses every filter above</span></div>
+        <div class="tools">
+          <span class="note">Break down by</span><div class="seg" id="revBy"></div>
+          <span class="note">Show</span><div class="seg" id="revShow"></div>
+          <input type="search" id="revSearch" placeholder="Search" aria-label="Search the breakdown">
+        </div>
+        <p class="fc-note" id="revMsg" hidden></p>
+      </div>
+      <div id="revBody" class="panel">
+        <div class="tiles-k" id="revTiles"></div>
+        <div class="card">
+          <div class="card-h"><h2 id="revChartTitle">Biggest losses and gains</h2><span class="sub">net = gross revenue − gross expense</span></div>
+          <div class="legend"><span><i class="sq" style="background:var(--good)"></i>Profitable (net above $0)</span><span><i class="sq" style="background:var(--crit)"></i>Losing money (net below $0)</span></div>
+          <div class="chart" id="cRev"></div>
+        </div>
+        <div class="card">
+          <div class="card-h"><h2 id="revTableTitle">Net by customer</h2><span class="sub">click a heading to sort, click a row for its detail</span><button class="otp-linkbtn copybtn" type="button" data-copy="#tRev" title="Copy this table, then paste into Excel">Copy</button></div>
+          <div class="tscroll" id="tRev"></div>
+          <div class="tools" id="tRevMore"></div>
+        </div>
+        <div class="card" id="revDetail" hidden></div>
       </div>
     </section>
 

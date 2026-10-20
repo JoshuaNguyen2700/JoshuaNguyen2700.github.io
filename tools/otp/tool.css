@@ -110,7 +110,13 @@
 .tiles-k{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}
 .ktile{background:transparent;border:1px solid var(--line);border-radius:10px;padding:14px 16px;display:grid;gap:4px;align-content:start}
 .ktile .eyebrow{margin:0}
+/* the money tile's label is a drop-down (gross revenue / gross expense / net) */
+.otp .ktile .tile-sel{justify-self:start;max-width:100%;font-size:12px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);
+  background:transparent;border:1px solid var(--o-axis);border-radius:6px;padding:1px 4px;margin:-2px 0 -1px -5px;cursor:pointer}
+.otp .ktile .tile-sel:hover,.otp .ktile .tile-sel:focus-visible{color:var(--text);border-color:var(--muted)}
+.otp .ktile .tile-sel option{text-transform:none;letter-spacing:0;color:var(--text);background:var(--o-raised)}
 .ktile .v{font-size:28px;font-weight:600;letter-spacing:-.02em;line-height:1.1}
+.ktile .v.neg{color:var(--crit)}
 .ktile .d{font-size:13px;color:var(--muted)}
 .ktile.proj{background:transparent;border:1px dashed var(--o-axis)}
 .ktile.proj .v{color:var(--o-ink2)}
@@ -118,6 +124,20 @@
 .pill{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;padding:1px 9px;border-radius:6px;width:fit-content}
 .pill.bad{background:rgb(var(--crit-rgb) / .12);color:var(--crit)}
 .pill.ok{background:color-mix(in srgb,var(--good) 14%,transparent);color:var(--good)}
+/* weekly summary: gross revenue in green, gross expense in red, net green when positive and red when negative */
+#tWeek td.rev,#tWeek td.net.up{color:var(--good)}
+#tWeek td.exp,#tWeek td.net.down{color:var(--crit)}
+/* revenue breakdown: same colors; rows open a detail card, headings sort */
+.otp table.rv td.rev,.otp table.rv td.up{color:var(--good)}
+.otp table.rv td.exp,.otp table.rv td.down{color:var(--crit)}
+.otp table.rv th.sortable{cursor:pointer;user-select:none}
+.otp table.rv th.sortable:hover{color:var(--text)}
+#tRev tbody tr[data-k]{cursor:pointer}
+#tRev tbody tr.sel td{box-shadow:inset 0 0 0 100vmax var(--o-hover);font-weight:600}
+#tRev tbody tr.sel td:first-child{box-shadow:inset 3px 0 0 var(--text),inset 0 0 0 100vmax var(--o-hover)}
+.rv-part{display:grid;gap:8px;min-width:0;align-content:start}
+.rv-part h3{margin:0;font-size:14px;font-weight:600;color:var(--o-ink2)}
+#revDetail .card-h .otp-linkbtn{margin-left:8px}
 
 /* cards */
 .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,520px),1fr));gap:18px}
