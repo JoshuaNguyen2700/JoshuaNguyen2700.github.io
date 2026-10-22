@@ -33,8 +33,8 @@ function toSerial(v) {
   if (typeof v === 'number') return v > 0 ? Math.floor(v) : null;
   let m = /^(\d{4})-(\d{2})-(\d{2})/.exec(v);
   if (m) return Math.round((Date.UTC(+m[1], +m[2] - 1, +m[3]) - EPOCH) / DAY);
-  m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(v.trim());
-  if (m) return Math.round((Date.UTC(+m[3], +m[1] - 1, +m[2]) - EPOCH) / DAY);
+  m = /^(\d{1,2})\/(\d{1,2})\/(\d{4}|\d{2})$/.exec(v.trim());   // 10/22/2026, or Worldport's 10/22/26
+  if (m) return Math.round((Date.UTC(m[3].length === 2 ? 2000 + +m[3] : +m[3], +m[1] - 1, +m[2]) - EPOCH) / DAY);
   return null;
 }
 const hasTime = (v) => typeof v === 'number' && !Number.isInteger(v);
@@ -403,45 +403,141 @@ async function processWorkbook(file, agg, progress) {
   const label = (k, i) => { const v = str(raw(k, i)).trim(); return !v || v[0] === '#' || v === '0' ? '' : v; };
 
   let rows = 0, maxShip = 0; const mism = {}, anomalies = {};
-  const bump = (o, k) => (o[k] = (o[k] || 0) + 1);
   for (let i = 0; i < maxRow; i++) {
     const custRaw = str(raw('cust', i));
     if (!hasA[i] && custRaw === '') continue;
     const cust = custRaw.toUpperCase(), map = csrMap.get(cust);
     const account = label('c_accounts', i) || (map ? map[0] : '#N/A (not on CSR tab)');
     const csr = label('c_csr', i) || (map ? map[1] : '#N/A (not on CSR tab)');
-    const ship = toSerial(raw('ship', i)), podRaw = raw('pod', i), pod = toSerial(podRaw);
+    const ship = toSerial(raw('ship', i));
     if (ship > maxShip) maxShip = ship;
-    const slaTxt = str(raw('transit', i)).slice(0, 1), slaErr = !/^\d$/.test(slaTxt);
-    const oz = str(raw('origZone', i)).toUpperCase(), dz = str(raw('destZone', i)).toUpperCase();
-    let status;
-    if (pod == null) status = 'No Pod Yet';
-    else if (slaErr) { status = 'Error'; bump(anomalies, 'SLA not numeric (Transit Time) with POD'); }
-    else if (ship == null) { status = 'Late'; bump(anomalies, 'POD but no ship date'); }
-    else {
-      const slaAdj = +slaTxt + (ZONES_OK.has(dz) ? 0 : 1) + (ZONES_OK.has(oz) ? 0 : 1);
-      const due = workday(ship, slaAdj, hol);
-      // Excel compares the full POD timestamp: on the due date but with a time of day is "Late"
-      status = pod < due || (pod === due && !hasTime(podRaw)) ? 'On-Time' : 'Late';
-    }
-    const defect = str(raw('defect', i));
-    const carrier = defect === '' ? 'No Delay Code' : (ctrl.get(defect.toUpperCase()) ?? '#N/A');
-    if (status === 'Late' && carrier === '#N/A') bump(anomalies, 'Late with defect code not in delay-code table');
-    const exc = str(raw('exception', i)).trim();
-    const delay = status === 'On-Time' ? 'On-Time' : (exc || 'Missing Delay Code');
-    const netLate = status === 'Late' && carrier === 'Controllable';
-    const rv = raw('revenue', i), rev = typeof rv === 'number' ? rv : 0;
-    // The export stores expense as a negative amount (-104.02 against 160.46 revenue); flip it so expense is a cost.
-    const ev = raw('expense', i), exp = typeof ev === 'number' ? -ev : 0;
+    const s = score(ship, raw('pod', i), raw('transit', i), raw('origZone', i), raw('destZone', i), raw('defect', i), raw('exception', i), hol, ctrl, anomalies);
     const cOn = str(raw('c_onTime', i));
-    if ((cOn === 'On-Time' || cOn === 'Late' || cOn === 'No Pod Yet') && cOn !== status) bump(mism, 'On-Time');
+    if ((cOn === 'On-Time' || cOn === 'Late' || cOn === 'No Pod Yet') && cOn !== s.status) bump(mism, 'On-Time');
     const cNet = raw('c_netLate', i);
-    if (typeof cNet === 'number' && Boolean(cNet) !== netLate) bump(mism, 'Net_Late');
-    agg.add(region, str(raw('custName', i)).trim() || cust, account, csr, ship, pod, status, delay, carrier === 'Controllable', netLate, rev, exp);
+    if (typeof cNet === 'number' && Boolean(cNet) !== s.netLate) bump(mism, 'Net_Late');
+    agg.add(region, str(raw('custName', i)).trim() || cust, account, csr, ship, s.pod, s.status, s.delay, s.controllable, s.netLate, money(raw('revenue', i)), -money(raw('expense', i)));
     rows++;
   }
   progress({ file: name, stage: 'Done', pct: 100, rows });
   return { region, rows, mismatches: mism, anomalies, holidays: hol.size, maxShip };
+}
+
+// The export stores expense as a negative amount (-104.02 against 160.46 revenue); callers flip it so expense is a cost.
+const money = (v) => (typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' && isFinite(+v) ? +v : 0);
+const bump = (o, k) => (o[k] = (o[k] || 0) + 1);
+// On-time status, delay reason and net-late for one shipment, the same way the export's formula columns work.
+function score(ship, podRaw, transit, origZone, destZone, defectRaw, exception, hol, ctrl, anomalies) {
+  const pod = toSerial(podRaw);
+  const slaTxt = str(transit).slice(0, 1), slaErr = !/^\d$/.test(slaTxt);
+  const oz = str(origZone).toUpperCase(), dz = str(destZone).toUpperCase();
+  let status;
+  if (pod == null) status = 'No Pod Yet';
+  else if (slaErr) { status = 'Error'; bump(anomalies, 'SLA not numeric (Transit Time) with POD'); }
+  else if (ship == null) { status = 'Late'; bump(anomalies, 'POD but no ship date'); }
+  else {
+    const slaAdj = +slaTxt + (ZONES_OK.has(dz) ? 0 : 1) + (ZONES_OK.has(oz) ? 0 : 1);
+    const due = workday(ship, slaAdj, hol);
+    // Excel compares the full POD timestamp: on the due date but with a time of day is "Late"
+    status = pod < due || (pod === due && !hasTime(podRaw)) ? 'On-Time' : 'Late';
+  }
+  const defect = str(defectRaw).trim();
+  const carrier = defect === '' ? 'No Delay Code' : (ctrl.get(defect.toUpperCase()) ?? '#N/A');
+  if (status === 'Late' && carrier === '#N/A') bump(anomalies, 'Late with defect code not in delay-code table');
+  const exc = str(exception).trim();
+  return { pod, status, delay: status === 'On-Time' ? 'On-Time' : (exc || 'Missing Delay Code'),
+    controllable: carrier === 'Controllable', netLate: status === 'Late' && carrier === 'Controllable' };
+}
+
+// ---------- Worldport OTM files (.csv from the WP Merge Tool, or the raw .DIF files) ----------
+// The same columns as the region exports' data sheet, without the CSR and delay-code tabs, so those come from
+// the tables below (copied from the exports' tabs). Account is the WP customer code; CSR isn't known.
+const OTM_HOLIDAYS = ['2025-07-04', '2025-09-01', '2025-11-27', '2025-12-25', '2026-01-01', '2026-05-25', '2026-07-03', '2026-09-07', '2026-11-26', '2026-12-25'];
+const OTM_CONTROLLABLE = ['A09', 'A10', 'A15', 'A30', 'A33', 'A91', 'C02', 'D01', 'D02', 'D03', 'E01'];
+const OTM_UNCONTROLLABLE = ['A03', 'A05', 'A07', 'A11', 'A12', 'A13', 'A14', 'A17', 'A18', 'A19', 'A20', 'A22', 'A24', 'A40', 'A42', 'A43', 'A46', 'A84',
+  'A92', 'A95', 'B01', 'B02', 'B04', 'B06', 'B08', 'B09', 'B10', 'B11', 'B13', 'B16', 'C01', 'C03', 'C10', 'HAZ', 'SIC', 'S01', 'S02', 'S03', 'S04', 'WEC'];
+const OTM_CSR = '(no CSR tab)';
+export const isOtmName = (n) => /\.(csv|dif)$/i.test(n);
+
+// CSV text -> rows of strings (quoted fields may hold commas, quotes and line breaks).
+function csvRows(text, onRow) {
+  let row = [], f = '', q = false;
+  for (let i = text.charCodeAt(0) === 0xFEFF ? 1 : 0; i < text.length; i++) {
+    const ch = text[i];
+    if (q) { if (ch === '"') { if (text[i + 1] === '"') { f += '"'; i++; } else q = false; } else f += ch; }
+    else if (ch === '"') q = true;
+    else if (ch === ',') { row.push(f); f = ''; }
+    else if (ch === '\n' || ch === '\r') { if (ch === '\r' && text[i + 1] === '\n') i++; row.push(f); onRow(row); row = []; f = ''; }
+    else f += ch;
+  }
+  if (f !== '' || row.length) { row.push(f); onRow(row); }
+}
+// Worldport DIF text -> rows. Text can wrap across lines; a damaged record is skipped and reading resumes at the
+// next record (same rules as the WP Merge Tool).
+const DIF_TUPLE = /^(-1,0|1,0|0,[-+0-9.Ee]*)$/;
+const unclosed = (v) => { const s = v.slice(1); return (s.length - s.replace(/"+$/, '').length) % 2 === 0; };   // even closing quotes: text goes on
+function difRows(text, onRow) {
+  const lines = text.split(/\r?\n/);
+  let i = lines.findIndex((l) => l.trim() === 'DATA');
+  if (i < 0) return;
+  i += 3;
+  let row = null, broken = false, width = 0;
+  const finish = () => { if (row && row.length && !broken && (!width || row.length === width)) { if (!width) width = row.length; onRow(row); } };
+  while (i < lines.length) {
+    const line = lines[i];
+    if (line.trim() === 'EOD' || (line === '-1,0' && lines[i + 1] === 'EOD')) { finish(); return; }
+    if (line === '-1,0' && lines[i + 1] === 'BOT') { finish(); row = []; broken = false; i += 2; continue; }
+    if (!row || broken) { i++; continue; }
+    if (!DIF_TUPLE.test(line) || i + 1 >= lines.length) { broken = true; i++; continue; }
+    const [kind, num] = line.split(','); let val = lines[i + 1]; i += 2;
+    if (kind === '1' && val.startsWith('"')) {
+      while (unclosed(val)) {
+        if (i >= lines.length || DIF_TUPLE.test(lines[i]) || lines[i] === 'BOT' || lines[i] === 'EOD') { broken = true; break; }
+        val += ' ' + lines[i++];
+      }
+      if (!broken) row.push(val.slice(1, -1).replace(/""/g, '"'));
+    } else if (kind === '1') row.push(val);
+    else row.push(val === 'V' ? num : val === 'NA' ? '' : val);
+  }
+  // a file cut off mid-record keeps its complete records only
+}
+
+async function processOtm(t, agg, progress) {
+  const parts = t.otm, region = 'OTM', anomalies = {};
+  const hol = new Set(OTM_HOLIDAYS.map(toSerial));
+  const ctrl = new Map([...OTM_CONTROLLABLE.map((c) => [c, 'Controllable']), ...OTM_UNCONTROLLABLE.map((c) => [c, 'Uncontrollable'])]);
+  // Only the columns the dashboard uses are kept. A HAWB in several files (Worldport re-sends) counts once: the last one read.
+  const COLS = [0, ...Object.values(NEEDED_BASE)], byHawb = new Map();
+  for (let n = 0; n < parts.length; n++) {
+    const p = parts[n], file = await openTask(p, () => {});
+    progress({ file: p.name, stage: 'Reading shipments', pct: 10 });
+    const buf = await file.arrayBuffer();
+    const dif = /\.dif$/i.test(p.name), text = new TextDecoder(dif ? 'latin1' : 'utf-8').decode(buf);
+    let header = null, count = 0;
+    (dif ? difRows : csvRows)(text, (r) => {
+      if (!header) {
+        header = r.map((h) => h.trim());
+        for (const [i, nm] of Object.entries(EXPECTED)) if (header[i] !== nm) throw new Error(`is not an OTP export (column ${+i + 1} is "${header[i] || ''}", expected "${nm}")`);
+        return;
+      }
+      const hawb = (r[0] || '').trim();
+      if (!hawb && !(r[1] || '').trim()) return;
+      byHawb.set(hawb || 'row' + byHawb.size, COLS.map((c) => r[c] ?? ''));
+      count++;
+    });
+    if (!header) throw new Error(`${p.name} has no data`);
+    progress({ file: p.name, stage: 'Done', pct: 100, rows: count });
+  }
+  const at = Object.fromEntries(['hawb', ...Object.keys(NEEDED_BASE)].map((k, i) => [k, i]));
+  let rows = 0, maxShip = 0;
+  for (const r of byHawb.values()) {
+    const cust = r[at.cust].trim().toUpperCase(), ship = toSerial(r[at.ship]);
+    if (ship > maxShip) maxShip = ship;
+    const s = score(ship, r[at.pod], r[at.transit], r[at.origZone], r[at.destZone], r[at.defect], r[at.exception], hol, ctrl, anomalies);
+    agg.add(region, r[at.custName].trim() || cust, cust || '(blank)', OTM_CSR, ship, s.pod, s.status, s.delay, s.controllable, s.netLate, money(r[at.revenue]), -money(r[at.expense]));
+    rows++;
+  }
+  return { region, rows, mismatches: {}, anomalies, holidays: hol.size, maxShip };
 }
 
 // ---------- roll-up (same shape as build_otp_dashboard.py output) ----------
@@ -485,9 +581,10 @@ class Aggregator {
 // A task is one workbook: a plain .xlsx/.xlsb File, or one entry inside a .zip ({ zip, path }). Tasks hold only
 // Files and strings, so the page can hand each one to its own worker and read several files at once.
 export async function listTasks(files, progress = () => {}) {
-  const tasks = [], skipped = [];
+  const tasks = [], skipped = [], otm = [];
   for (const f of files) {
     if (/\.xls[xb]$/i.test(f.name)) { tasks.push({ name: f.name, file: f }); continue; }
+    if (isOtmName(f.name)) { otm.push({ name: f.name, file: f }); continue; }
     if (!/\.zip$/i.test(f.name)) {
       skipped.push({ file: f.name, reason: 'is not an .xlsx, .xlsb or .zip file' });
       progress({ file: f.name, stage: 'Skipped: not an .xlsx, .xlsb or .zip file', pct: 100, skipped: true });
@@ -498,15 +595,24 @@ export async function listTasks(files, progress = () => {}) {
       const inner = [];
       for (const path of (await listZip(f)).keys()) {
         const base = path.split('/').pop();
-        if (/\.xls[xb]$/i.test(base) && !base.startsWith('~$') && !path.startsWith('__MACOSX/')) inner.push({ name: base, zip: f, path });
+        if (base.startsWith('~$') || path.startsWith('__MACOSX/')) continue;
+        if (/\.xls[xb]$/i.test(base)) inner.push({ name: base, zip: f, path });
+        else if (isOtmName(base)) otm.push({ name: base, zip: f, path });
       }
-      progress({ file: f.name, stage: inner.length ? `Unzipped: ${inner.map((x) => x.name).join(', ')}` : 'Skipped: no .xlsx or .xlsb files inside', pct: 100, skipped: !inner.length, zip: inner.map((x) => x.name) });
-      if (!inner.length) skipped.push({ file: f.name, reason: 'has no .xlsx or .xlsb files inside' });
+      const got = inner.length || otm.some((x) => x.zip === f), names = [...inner, ...otm.filter((x) => x.zip === f)].map((x) => x.name);
+      progress({ file: f.name, stage: got ? `Unzipped: ${names.length > 6 ? names.length + ' files' : names.join(', ')}` : 'Skipped: no .xlsx or .xlsb files inside', pct: 100, skipped: !got, zip: names });
+      if (!got) skipped.push({ file: f.name, reason: 'has no .xlsx or .xlsb files inside' });
       tasks.push(...inner);
     } catch (e) {
       skipped.push({ file: f.name, reason: 'could not be opened as a zip file' });
       progress({ file: f.name, stage: 'Skipped: could not be opened as a zip file', pct: 100, skipped: true });
     }
+  }
+  // Worldport OTM files (not advertised on the page) are read together as one task, so a HAWB that
+  // Worldport sent in several files counts once. Files are read in name order (DIF names start with the time sent).
+  if (otm.length) {
+    otm.sort((a, b) => a.name.localeCompare(b.name, 'en', { numeric: true }));
+    tasks.push({ name: otm.length === 1 ? otm[0].name : `${otm[0].name} (+${otm.length - 1} more)`, otm });
   }
   return { tasks, skipped };
 }
@@ -525,6 +631,10 @@ async function openTask(t, progress) {
 
 // Reads one task. The result is plain data (Maps, arrays and numbers), so a worker can post it back to the page.
 export async function readTask(t, progress = () => {}) {
+  if (t.otm) {
+    const a = new Aggregator(), r = await processOtm(t, a, progress);
+    return { name: t.name, sources: t.otm.map((p) => p.name), lastModified: Math.max(0, ...t.otm.map((p) => (p.file || p.zip).lastModified || 0)), r, agg: { dims: a.dims, pod: a.pod, ship: a.ship, delay: a.delay } };
+  }
   const file = await openTask(t, progress), a = new Aggregator(), r = await processWorkbook(file, a, progress);
   return { name: t.name, lastModified: file.lastModified || 0, r, agg: { dims: a.dims, pod: a.pod, ship: a.ship, delay: a.delay } };
 }
@@ -535,7 +645,7 @@ export function combine(results, skipped = []) {
   for (const res of results) {
     if (!res) continue;
     if (res.error) { skipped.push({ file: res.name, reason: res.error }); continue; }
-    const f = { name: res.name, lastModified: res.lastModified }, r = res.r;
+    const f = { name: res.name, sources: res.sources, lastModified: res.lastModified }, r = res.r;
     // Two files for the same region (e.g. last week's and this week's export) would double count, so only
     // the one with the latest shipments is used (if equal, the more recently saved file).
     const prev = best.get(r.region);
@@ -550,7 +660,7 @@ export function combine(results, skipped = []) {
   for (const { f, a, r } of best.values()) {
     agg.merge(a);
     checks[r.region] = { rows: r.rows, mismatches: r.mismatches, anomalies: r.anomalies };
-    sources.push(f.name);
+    sources.push(...(f.sources || [f.name]));
   }
   if (!sources.length) throw new Error(skipped.length ? `None of the files could be read. ${skipped[0].file} ${skipped[0].reason}.` : 'No files were chosen.');
   return Object.assign(agg.result(sources, checks), { skipped });
