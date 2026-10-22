@@ -52,13 +52,14 @@ const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v
 
 // ---------- loaded data + view state ----------
 let DATA = null, dims = null, NR = 0, months = [], S = null, A = null, RS = new Set();
+let FA = null, FC = null, FU = null;   // ticked accounts, CSRs, customers as sets; null = all
 // A-Z by name; placeholders such as "#N/A (not on CSR tab)" or "(blank)" go last.
 const byName = (names) => (a, b) => {
   const x = String(names[a]), y = String(names[b]), px = !/^[a-z0-9]/i.test(x), py = !/^[a-z0-9]/i.test(y);
   return px !== py ? (px ? 1 : -1) : x.localeCompare(y, 'en', { sensitivity: 'base', numeric: true });
 };
 
-const defaults = () => ({ regions: Array.from({ length: NR }, (_, i) => i), account: -1, csr: -1, cust: -1,
+const defaults = () => ({ regions: Array.from({ length: NR }, (_, i) => i), account: [], csr: [], cust: [],
   from: months[0], to: months[months.length - 1], tab: 'dash', otpMetric: 'gross', csrMetric: 'gross', csrPer: 'week', fcH: 8, fcBasis: 12, revOn: true, revKind: 'net',
   revBy: 'cust', revShow: 'all', revSort: 'net', revDir: 1, revOpen: '' });
 // Revenue can be hidden everywhere (screens and exports), e.g. when sharing the screen.
@@ -120,6 +121,9 @@ function load(d) {
   } catch (e) {}
   S.regions = (Array.isArray(S.regions) ? S.regions : []).filter((i) => Number.isInteger(i) && i >= 0 && i < NR);
   if (!S.regions.length) S.regions = defaults().regions;
+  // account/csr/cust were one id (-1 = all) before several names could be ticked
+  for (const k of ['account', 'csr', 'cust'])
+    S[k] = Array.isArray(S[k]) ? S[k].filter(Number.isInteger) : Number.isInteger(S[k]) && S[k] >= 0 ? [S[k]] : [];
 
   show('app');
   updateBanner();
@@ -250,19 +254,29 @@ function optionsFor(dimKey, col) {
   for (const t of [DATA.ship, DATA.pod]) for (const r of t) if (rs.has(r[0])) seen.add(r[col]);
   return [...seen].sort((a, b) => String(dims[dimKey][a]).localeCompare(String(dims[dimKey][b])));
 }
-function fillSelect(el, dimKey, col, cur, allLabel) {
-  const ids = optionsFor(dimKey, col);
-  el.innerHTML = `<option value="-1">${allLabel}</option>` + ids.map((i) => `<option value="${i}">${esc(dims[dimKey][i])}</option>`).join('');
-  const keep = ids.includes(cur) ? cur : -1;
-  el.value = String(keep);
-  return keep;
+// Account, CSR and customer each take any number of ticked names; none ticked means all.
+const MULTI = [['#fAccount', 'account', 2, 'All accounts', 'accounts'], ['#fCsr', 'csr', 3, 'All CSRs', 'CSRs'], ['#fCust', 'cust', 1, 'All customers', 'customers']];
+const pickNames = (key) => S[key].map((i) => dims[key][i]);
+const pickText = (key, many, max = 3) => (S[key].length > max ? `${S[key].length} ${many}` : pickNames(key).join(', '));
+function msLabel(key, all, many) { return !S[key].length ? all : S[key].length === 1 ? dims[key][S[key][0]] : `${S[key].length} ${many}`; }
+function fillMulti(el, key, col, all, many) {
+  const ids = optionsFor(key, col), have = new Set(ids);
+  S[key] = S[key].filter((i) => have.has(i));
+  const on = new Set(S[key]);
+  el.innerHTML = `<button type="button" class="ms-btn" aria-haspopup="true" aria-expanded="false" aria-labelledby="${el.id}L ${el.id}V"><span id="${el.id}V">${esc(msLabel(key, all, many))}</span></button>
+    <div class="ms-pop" hidden>
+      <input type="search" placeholder="Search ${many}" aria-label="Search ${many}">
+      <div class="ms-acts"><button type="button" class="otp-linkbtn" data-act="all">${all}</button><button type="button" class="otp-linkbtn" data-act="shown">Tick all shown</button></div>
+      <div class="ms-list" role="group" aria-label="${many}">${ids.map((i) => `<label><input type="checkbox" value="${i}"${on.has(i) ? ' checked' : ''}><span>${esc(dims[key][i])}</span></label>`).join('')}</div>
+    </div>`;
+}
+function msClose(except) {
+  for (const [id] of MULTI) { const el = $(id); if (el === except || !el.firstChild) continue; el.querySelector('.ms-pop').hidden = true; el.querySelector('.ms-btn').setAttribute('aria-expanded', 'false'); }
 }
 function buildFilters() {
   $('#regionChips').innerHTML = `<button class="chip" type="button" data-r="all" aria-pressed="${S.regions.length === NR}">All</button>` +
     dims.region.map((n, i) => `<button class="chip" type="button" data-r="${i}" aria-pressed="${S.regions.length < NR && S.regions.includes(i)}">${esc(n)}</button>`).join('');
-  S.account = fillSelect($('#fAccount'), 'account', 2, S.account, 'All accounts');
-  S.csr = fillSelect($('#fCsr'), 'csr', 3, S.csr, 'All CSRs');
-  S.cust = fillSelect($('#fCust'), 'cust', 1, S.cust, 'All customers');
+  for (const [id, key, col, all, many] of MULTI) fillMulti($(id), key, col, all, many);
   const mo = months.map((k) => `<option value="${k}">${ymLabel(k)}</option>`).join('');
   $('#fFrom').innerHTML = mo; $('#fTo').innerHTML = mo;
   $('#fFrom').value = S.from; $('#fTo').value = S.to;
@@ -278,8 +292,35 @@ $('#regionChips').addEventListener('click', (e) => {
   }
   buildFilters(); update();
 });
-for (const [id, key] of [['#fAccount', 'account'], ['#fCsr', 'csr'], ['#fCust', 'cust']])
-  $(id).addEventListener('change', (e) => { S[key] = +e.target.value; update(); });
+for (const [id, key, , all, many] of MULTI) {
+  const el = $(id);
+  const apply = () => {
+    S[key] = [...el.querySelectorAll('.ms-list input:checked')].map((c) => +c.value);
+    $(id + 'V').textContent = msLabel(key, all, many);
+    update();
+  };
+  el.addEventListener('click', (e) => {
+    const btn = e.target.closest('.ms-btn');
+    if (btn) {
+      const pop = el.querySelector('.ms-pop'), open = pop.hidden;
+      msClose(el); pop.hidden = !open; btn.setAttribute('aria-expanded', String(open));
+      if (open) { const q = pop.querySelector('input[type="search"]'); q.value = ''; q.dispatchEvent(new Event('input', { bubbles: true })); q.focus(); }
+      return;
+    }
+    const act = e.target.closest('[data-act]')?.dataset.act;
+    if (act === 'all') el.querySelectorAll('.ms-list input').forEach((c) => (c.checked = false));
+    else if (act === 'shown') el.querySelectorAll('.ms-list label:not([hidden]) input').forEach((c) => (c.checked = true));
+    if (act) apply();
+  });
+  el.addEventListener('change', (e) => { if (e.target.type === 'checkbox') apply(); });
+  el.addEventListener('input', (e) => {
+    if (e.target.type !== 'search') return;
+    const q = e.target.value.trim().toLowerCase();
+    el.querySelectorAll('.ms-list label').forEach((l) => (l.hidden = !!q && !l.textContent.toLowerCase().includes(q)));
+  });
+  el.addEventListener('keydown', (e) => { if (e.key === 'Escape') { msClose(); el.querySelector('.ms-btn').focus(); } });
+}
+document.addEventListener('click', (e) => { if (!e.target.closest('.ms')) msClose(); });
 $('#fFrom').addEventListener('change', (e) => { S.from = +e.target.value; if (S.from > S.to) { S.to = S.from; $('#fTo').value = S.to; } update(); });
 $('#fTo').addEventListener('change', (e) => { S.to = +e.target.value; if (S.to < S.from) { S.from = S.to; $('#fFrom').value = S.from; } update(); });
 $('#resetBtn').addEventListener('click', () => { const t = S.tab, k = S.revKind; S = defaults(); S.tab = t; S.revKind = k; buildFilters(); update(); });
@@ -289,9 +330,9 @@ $('#tiles').addEventListener('change', (e) => { if (e.target.id === 'moneySel') 
 function renderMini() {
   if (!DATA) return;
   const parts = [S.regions.length === NR ? 'All regions' : S.regions.map((i) => dims.region[i]).join(', ')];
-  if (S.account >= 0) parts.push(dims.account[S.account]);
-  if (S.csr >= 0) parts.push('CSR: ' + dims.csr[S.csr]);
-  if (S.cust >= 0) parts.push(dims.cust[S.cust]);
+  if (S.account.length) parts.push(pickText('account', 'accounts'));
+  if (S.csr.length) parts.push('CSR: ' + pickText('csr', 'CSRs'));
+  if (S.cust.length) parts.push(pickText('cust', 'customers'));
   parts.push(S.from === S.to ? ymLabel(S.from) : `${ymLabel(S.from)} – ${ymLabel(S.to)}`);
   $('#miniSummary').textContent = parts.join(' · ');
 }
@@ -320,10 +361,12 @@ $('.otp-tabs').addEventListener('click', (e) => { const b = e.target.closest('.t
 //            delay [region, cust, account, csr, year, week, month, delay, controllable, count]
 const pass = (r) => {
   const ym = r.ym;
-  return ym >= S.from && ym <= S.to && RS.has(r[0]) && (S.account < 0 || r[2] === S.account) && (S.csr < 0 || r[3] === S.csr) && (S.cust < 0 || r[1] === S.cust);
+  return ym >= S.from && ym <= S.to && RS.has(r[0]) && (!FA || FA.has(r[2])) && (!FC || FC.has(r[3])) && (!FU || FU.has(r[1]));
 };
 function aggregate() {
   RS = new Set(S.regions);
+  const set = (a) => (a.length ? new Set(a) : null);
+  FA = set(S.account); FC = set(S.csr); FU = set(S.cust);
   const podW = new Map(), shipW = new Map(), delay = new Map(), regP = new Map(), regS = new Map();
   const tot = { h: 0, gl: 0, nl: 0, rev: 0, exp: 0, shipped: 0 }, podRows = [], shipRows = [];
   const bump = (m, k) => { let o = m.get(k); if (!o) m.set(k, (o = { h: 0, gl: 0, nl: 0, rev: 0, exp: 0 })); return o; };
@@ -837,7 +880,7 @@ const FC_DAMP = 0.8; // the trend eases off further out instead of running away
 const mondayIdx = (y, w) => { const j = Date.UTC(y, 0, 1); return Math.round(((j - ((new Date(j).getUTCDay() + 6) % 7) * DAY + 7 * (w - 1) * DAY) / DAY - 4) / 7); };
 const idxDate = (i) => new Date((i * 7 + 4) * DAY);
 const idxLabel = (i) => { const d = idxDate(i); return MON[d.getUTCMonth()] + ' ' + d.getUTCDate(); };
-const passNoMonth = (r, valid) => valid.has(r.ym) && RS.has(r[0]) && (S.account < 0 || r[2] === S.account) && (S.csr < 0 || r[3] === S.csr) && (S.cust < 0 || r[1] === S.cust);
+const passNoMonth = (r, valid) => valid.has(r.ym) && RS.has(r[0]) && (!FA || FA.has(r[2])) && (!FC || FC.has(r[3])) && (!FU || FU.has(r[1]));
 
 // Sums the given fact columns per Monday-week, filling missing weeks with zeros.
 function weekly(table, cols) {
@@ -1111,9 +1154,9 @@ function filterLines() {
     ['Source files', (DATA.sources || []).join(', ')],
     [],
     ['Regions', S.regions.length === NR ? 'All regions' : S.regions.map((i) => dims.region[i]).join(', ')],
-    ['Account', S.account >= 0 ? dims.account[S.account] : 'All accounts'],
-    ['CSR', S.csr >= 0 ? dims.csr[S.csr] : 'All CSRs'],
-    ['Customer', S.cust >= 0 ? dims.cust[S.cust] : 'All customers'],
+    ['Account', S.account.length ? pickNames('account').join(', ') : 'All accounts'],
+    ['CSR', S.csr.length ? pickNames('csr').join(', ') : 'All CSRs'],
+    ['Customer', S.cust.length ? pickNames('cust').join(', ') : 'All customers'],
     ['Months', `${ymLabel(S.from)} – ${ymLabel(S.to)} (ship month for volume, POD month for OTP)`],
     [],
     ['RAW%', 'Gross on-time: delivered on or before the adjusted due date'],
@@ -1124,7 +1167,7 @@ function filterLines() {
 }
 function exportName() {
   const reg = S.regions.length === NR ? 'All regions' : S.regions.map((i) => dims.region[i]).join(' ');
-  const who = [S.account >= 0 ? dims.account[S.account] : '', S.csr >= 0 ? dims.csr[S.csr] : '', S.cust >= 0 ? dims.cust[S.cust] : ''].filter(Boolean).join(' ');
+  const who = [pickText('account', 'accounts', 2), pickText('csr', 'CSRs', 2), pickText('cust', 'customers', 2)].filter(Boolean).join(' ');
   const name = `OTP export - ${reg}${who ? ' - ' + who : ''} - ${ymLabel(S.from)} to ${ymLabel(S.to)}`;
   return name.replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ').slice(0, 150) + '.xlsx';
 }
@@ -1364,9 +1407,9 @@ const pctTxt = (p, d = 1) => (p == null || !isFinite(p) ? '–' : (p * 100).toFi
 const ptsTxt = (d) => (d == null || !isFinite(d) ? '' : `${d >= 0 ? '+' : '–'}${Math.abs(d * 100).toFixed(1)} pts`);
 function filterText() {
   const parts = [S.regions.length === NR ? 'All regions' : S.regions.map((i) => dims.region[i]).join(', ')];
-  if (S.account >= 0) parts.push(dims.account[S.account]);
-  if (S.csr >= 0) parts.push('CSR: ' + dims.csr[S.csr]);
-  if (S.cust >= 0) parts.push(dims.cust[S.cust]);
+  if (S.account.length) parts.push(pickText('account', 'accounts'));
+  if (S.csr.length) parts.push('CSR: ' + pickText('csr', 'CSRs'));
+  if (S.cust.length) parts.push(pickText('cust', 'customers'));
   parts.push(S.from === S.to ? ymLabel(S.from) : `${ymLabel(S.from)} – ${ymLabel(S.to)}`);
   return parts.join(' · ');
 }
