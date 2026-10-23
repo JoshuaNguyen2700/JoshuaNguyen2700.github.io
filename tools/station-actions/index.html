@@ -19,16 +19,28 @@
     <div class="eyebrow">Upload your daily exports</div>
     <h1>Station Actions</h1>
     <p>The action cards from the Power BI Station / Customer Dashboard, one file per day from the Power Automate flow. Choose the <b>Customer_Station report</b> folder (Customer Service Center-Josh Test SharePoint, synced to OneDrive) to see today's numbers, what changed since the day before and the trend.</p>
-    <div class="actions">
-      <label class="btn" for="folderInput">Choose the folder</label>
+    <div class="actions" id="pickRow">
+      <label class="btn" for="folderInput">Choose a folder</label>
       <label class="btn sa-btn-alt" for="filesInput">Choose files</label>
     </div>
-    <div class="sa-drop">or drag the folder or the .csv files here.</div>
+    <!-- Folders and files picked so far; Load reads them all at once -->
+    <div class="sa-pending" id="pending" hidden>
+      <ul id="pendingList"></ul>
+      <div class="actions">
+        <button class="btn" id="loadBtn" type="button">Load</button>
+        <label class="link" for="folderInput">Add a folder</label>
+        <label class="link" for="filesInput">Add files</label>
+      </div>
+    </div>
+    <p class="sa-hint">Pick as many folders and files as you like; they all load together. Select several files at once with Ctrl+click. One file per day: .csv from the flow, or .xlsx if you saved one in Excel.</p>
+    <div class="sa-drop">or drag folders and files here, as many as you like.</div>
     <p class="sa-privacy">Your files stay on this computer. The browser reads them directly and nothing is sent anywhere.</p>
     <p class="sa-error" id="startError" role="alert" hidden></p>
   </section>
   <input type="file" id="folderInput" webkitdirectory multiple hidden>
-  <input type="file" id="filesInput" accept=".csv" multiple hidden>
+  <input type="file" id="filesInput" accept=".csv,.xlsx,.xls" multiple hidden>
+  <input type="file" id="addFolderInput" webkitdirectory multiple hidden>
+  <input type="file" id="addFilesInput" accept=".csv,.xlsx,.xls" multiple hidden>
 
   <div class="sa" id="app" hidden>
     <header class="sa-head">
@@ -41,7 +53,8 @@
         <div class="field"><label for="snap">Day</label><select id="snap"></select></div>
         <div class="sa-meta-actions">
           <button class="sa-btn sa-btn-primary" id="exportBtn" type="button" title="Download the numbers and HAWB lists for the current filters as an Excel workbook">Export to Excel</button>
-          <label class="sa-btn" for="filesInput" title="Add more daily files to what's loaded">Add files</label>
+          <label class="sa-btn" for="addFolderInput" title="Add another folder of daily files to what's loaded">Add folder</label>
+          <label class="sa-btn" for="addFilesInput" title="Add more daily files to what's loaded (select several at once)">Add files</label>
           <button class="sa-linkbtn" id="closeBtn" type="button" title="Clear everything and start again">Start over</button>
         </div>
       </div>

@@ -28,6 +28,19 @@
 .sa-drop{margin:28px auto 0;max-width:520px;border:1px dashed var(--o-axis);border-radius:10px;padding:22px;color:var(--muted);font-size:15px}
 body.dragging .sa-drop{border-color:var(--accent);color:var(--text);background:var(--o-hover)}
 .sa-privacy{font-size:14px !important;margin-top:14px !important}
+.sa-hint{font-size:15px !important;margin-top:16px !important}
+.sa-start label.link{cursor:pointer;color:var(--link)}
+.sa-start label.link:hover{text-decoration:underline}
+.sa-pending{margin:28px auto 0;max-width:520px;text-align:left}
+.sa-pending ul{list-style:none;margin:0;padding:0;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--o-card)}
+.sa-pending li{display:flex;align-items:baseline;gap:10px;padding:10px 14px;font-size:15px;border-bottom:1px solid var(--line)}
+.sa-pending li:last-child{border-bottom:0}
+.sa-pending li b{font-weight:600}
+.sa-pending li span{color:var(--muted);font-size:13px;flex:1;min-width:0}
+.sa-pending .actions{justify-content:flex-start;margin-top:18px}
+.sa-pending .actions .btn{margin-top:0;border:0;font:inherit;font-size:17px;cursor:pointer}
+.sa-x{font:inherit;font-size:13px;color:var(--crit);background:none;border:0;padding:0 2px;cursor:pointer}
+.sa-x:hover{text-decoration:underline}
 .sa-error{color:var(--crit) !important;font-size:15px !important}
 
 /* ---- app frame (wider than the bus max-width; this is a data tool) ---- */

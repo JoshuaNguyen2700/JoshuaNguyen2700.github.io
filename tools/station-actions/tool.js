@@ -52,8 +52,15 @@ function parseCSV(text) {
   if (f !== '' || row.length) { row.push(f); rows.push(row); }
   return rows;
 }
+const TABLE = /\.(csv|xlsx|xls)$/i;
 async function readTable(file) {
-  const rows = parseCSV((await file.text()).replace(/^﻿/, ''));
+  let rows;
+  if (/\.csv$/i.test(file.name)) rows = parseCSV((await file.text()).replace(/^﻿/, ''));
+  else {   // a daily file opened and saved in Excel: first sheet, values as Excel shows them
+    await loadXlsx();
+    const wb = XLSX.read(new Uint8Array(await file.arrayBuffer()), { type: 'array' });
+    rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: false, defval: '', blankrows: false }).map((r) => r.map(String));
+  }
   const head = (rows.shift() || []).map((h) => h.trim().replace(/^\[|\]$/g, ''));
   const col = Object.fromEntries(head.map((h, i) => [h, i]));
   return { head, col, rows: rows.filter((r) => r.length > 1) };
@@ -87,17 +94,24 @@ async function readSnap(file) {
 
 // ---------- loading ----------
 function showStartError(msg) { const e = $('#startError'); e.textContent = msg; e.hidden = !msg; }
+const NO_FILES = 'No .csv or .xlsx files there. Choose the Customer_Station report folder (Customer Service Center-Josh Test SharePoint), or the daily files in it.';
+const usable = (files) => files.filter((f) => TABLE.test(f.name) && !/^~\$/.test(f.name));
 async function loadFiles(files) {
-  files = files.filter((f) => /\.csv$/i.test(f.name) && !/^~\$/.test(f.name));
-  if (!files.length) { (SNAPS.length ? note : showStartError)('No .csv files there. Choose the Customer_Station report folder (Customer Service Center-Josh Test SharePoint), or the daily .csv files in it.'); return; }
+  files = usable(files);
+  if (!files.length) { (SNAPS.length ? note : showStartError)(NO_FILES); return; }
   const skipped = [];
   const byDay = new Map(SNAPS.map((s) => [s.day, s]));
   for (const f of files) {
     try {
       const s = await readSnap(f);
       if (s.skip) { skipped.push(`${f.name} (${s.skip})`); continue; }
+      // one file per day: two for the same day (a re-run of the flow, a download copy) keep the newest
       const old = byDay.get(s.day);
-      if (old && old.file.lastModified > f.lastModified) { skipped.push(`${f.name} (a newer file for ${dLabel(s.day, true)} is loaded)`); continue; }
+      if (old && old.file !== f) {
+        const [keep, drop] = old.file.lastModified > f.lastModified ? [old, s] : [s, old];
+        skipped.push(`${drop.name} (${dLabel(s.day, true)} already has ${keep.name}, which is newer)`);
+        if (keep === old) continue;
+      }
       byDay.set(s.day, s);
     } catch (e) { skipped.push(`${f.name} (${e.message})`); }
   }
@@ -423,11 +437,45 @@ $('#exportBtn').addEventListener('click', async () => {
 });
 
 // ---------- picking and dropping files ----------
+// On the start screen each folder or set of files picked (or dropped) joins a list, and Load reads them all
+// together. Once loaded, Add folder / Add files (or a drop) add more straight away. The same file twice counts once.
 const fromInput = (fl) => [...(fl || [])];
-$('#folderInput').addEventListener('change', (e) => { loadFiles(fromInput(e.target.files)); e.target.value = ''; });
-$('#filesInput').addEventListener('change', (e) => { loadFiles(fromInput(e.target.files)); e.target.value = ''; });
+const fileKey = (f) => `${f.name}|${f.size}|${f.lastModified}`;
+const topFolder = (f) => { const p = (f.webkitRelativePath || '').split('/'); return p.length > 1 ? p[0] : 'Files you picked'; };
+let PENDING = new Map();
+function stage(files) {
+  files = usable(files);
+  if (!files.length) { showStartError(NO_FILES); return; }
+  showStartError('');
+  for (const f of files) if (!PENDING.has(fileKey(f))) PENDING.set(fileKey(f), f);
+  renderPending();
+}
+function renderPending() {
+  const groups = new Map();
+  for (const f of PENDING.values()) { const g = topFolder(f); groups.set(g, [...(groups.get(g) || []), f]); }
+  $('#pending').hidden = !groups.size; $('#pickRow').hidden = !!groups.size;
+  $('#pendingList').innerHTML = [...groups].map(([g, fs]) => `<li><b>${esc(g)}</b><span>${fs.length} file${fs.length === 1 ? '' : 's'}</span><button class="sa-x" type="button" data-unstage="${esc(g)}">Remove</button></li>`).join('');
+  $('#loadBtn').textContent = `Load ${PENDING.size} file${PENDING.size === 1 ? '' : 's'}`;
+}
+$('#pendingList').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-unstage]'); if (!b) return;
+  for (const [k, f] of PENDING) if (topFolder(f) === b.dataset.unstage) PENDING.delete(k);
+  renderPending();
+});
+$('#loadBtn').addEventListener('click', async () => {
+  if (!PENDING.size) return;
+  const btn = $('#loadBtn'); btn.disabled = true; btn.textContent = 'Reading…';
+  const files = [...PENDING.values()];
+  await loadFiles(files);
+  btn.disabled = false;
+  if (SNAPS.length) PENDING = new Map();
+  renderPending();
+});
+for (const id of ['folderInput', 'filesInput']) $('#' + id).addEventListener('change', (e) => { stage(fromInput(e.target.files)); e.target.value = ''; });
+for (const id of ['addFolderInput', 'addFilesInput']) $('#' + id).addEventListener('change', (e) => { loadFiles(fromInput(e.target.files)); e.target.value = ''; });
 $('#closeBtn').addEventListener('click', () => {
   SNAPS = []; FULL = null; PREV = null; cur = -1; for (const [key] of DIMS) F[key].clear();
+  PENDING = new Map(); renderPending();
   $('#app').hidden = true; $('#start').hidden = false; note('');
 });
 async function dropFiles(dt) {
@@ -448,7 +496,7 @@ document.addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth
 document.addEventListener('dragover', (e) => e.preventDefault());
 document.addEventListener('drop', (e) => {
   e.preventDefault(); dragDepth = 0; document.body.classList.remove('dragging');
-  if (e.dataTransfer) dropFiles(e.dataTransfer).then(loadFiles, (err) => showStartError('Those files could not be opened: ' + err.message));
+  if (e.dataTransfer) dropFiles(e.dataTransfer).then((fs) => (SNAPS.length ? loadFiles(fs) : stage(fs)), (err) => showStartError('Those files could not be opened: ' + err.message));
 });
 let rT = 0;
 addEventListener('resize', () => { clearTimeout(rT); rT = setTimeout(() => { if (cur >= 0) { const series = SNAPS.map(countsOf); renderKpis(series); renderTrend(series); } }, 150); });
