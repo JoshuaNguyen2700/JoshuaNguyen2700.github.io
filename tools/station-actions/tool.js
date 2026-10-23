@@ -1,6 +1,6 @@
 // Logic for the station-actions tool only. It is an ES module, so nothing here leaks into other pages.
 // The page ships with no shipment data. The visitor picks the folder the "Station Dashboard – daily export"
-// Power Automate flow writes to (OneDrive > Power BI Exports > Station Dashboard): one CSV per day with every
+// Power Automate flow writes to (a SharePoint library folder, synced to OneDrive): one CSV per day with every
 // HAWB on six action cards of the Power BI Station / Customer Dashboard (column KPI = the card, Card Total =
 // that card's full count). Files are read in the browser; nothing is uploaded.
 // Every day's file is kept small (card, HAWB and the filter columns) for the counts and the trend; only the
@@ -89,7 +89,7 @@ async function readSnap(file) {
 function showStartError(msg) { const e = $('#startError'); e.textContent = msg; e.hidden = !msg; }
 async function loadFiles(files) {
   files = files.filter((f) => /\.csv$/i.test(f.name) && !/^~\$/.test(f.name));
-  if (!files.length) { (SNAPS.length ? note : showStartError)('No .csv files there. Choose the Station Dashboard folder in OneDrive (Power BI Exports), or the daily .csv files in it.'); return; }
+  if (!files.length) { (SNAPS.length ? note : showStartError)('No .csv files there. Choose the Customer_Station report folder (Customer Service Center-Josh Test SharePoint), or the daily .csv files in it.'); return; }
   const skipped = [];
   const byDay = new Map(SNAPS.map((s) => [s.day, s]));
   for (const f of files) {
