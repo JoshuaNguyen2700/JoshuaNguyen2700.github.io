@@ -11,6 +11,7 @@ import {
   prepare, buildLayout, unlisted, casesModel, custModel, summaryModel, daily, topCustomers, visibleBlocks, col, cS, cN,
   fmtHM, slaRows, slaOffRows, slaStats, slaAvg, slaGroups, slaModel, slaPick, slaCasesModel,
 } from './model.js';
+import { unzip } from './unzip.js';
 
 const $ = (s) => document.querySelector(s);
 const STATE_KEY = 'cc.state';   // the open tab and the weekends choice only; never data
@@ -59,7 +60,32 @@ function show(view) { for (const v of ['start', 'progress', 'app']) $('#' + v).h
 function showStartError(msg) { const e = $('#startError'); e.textContent = msg; e.hidden = !msg; if (msg) show(M ? 'app' : 'start'); }
 const REPORT = /\.(xls|xlsx|xlsm|csv)$/i;
 const reports = (items) => items.filter((it) => REPORT.test(it.file.name) && !/^~\$/.test(it.file.name));
-const NO_REPORTS = 'No report files there. Choose the .xls exports, or the Cview Report folder that holds them.';
+const NO_REPORTS = 'No report files there. Choose the .xls exports, the Cview Report folder that holds them, or a .zip of either.';
+// A .zip counts as a folder named after it: "EAST 10-9.zip" -> "EAST 10-9/<file>", so team folders work the
+// same zipped or not. A zip made from a folder of the same name ("EAST 10-9.zip" holding "EAST 10-9/...")
+// doesn't repeat it. Zips inside zips are opened too.
+const ZIP = /\.zip$/i;
+async function expandZips(items, depth = 0) {
+  const out = [];
+  for (const it of items) {
+    if (!ZIP.test(it.file.name) || depth > 3) { out.push(it); continue; }
+    let inner;
+    try { inner = await unzip(it.file); } catch (err) { throw new Error(`${it.file.name} could not be opened: ${err.message}.`); }
+    const folder = it.path.replace(ZIP, ''), base = folder.split('/').pop();
+    const tops = new Set(inner.map((x) => x.name.split('/')[0]));
+    const same = tops.size === 1 && inner.every((x) => x.name.includes('/')) && [...tops][0].toLowerCase() === base.toLowerCase();
+    const found = inner.map((x) => ({ file: x.file, path: folder + '/' + (same ? x.name.slice(x.name.indexOf('/') + 1) : x.name) }));
+    out.push(...await expandZips(found, depth + 1));
+  }
+  return out;
+}
+// Folders, files and zips picked or dropped all come through here.
+function take(items) {
+  if (!items.some((it) => ZIP.test(it.file.name))) { (M ? addItems : stage)(items); return; }
+  expandZips(items).then((all) => (M ? addItems : stage)(all), (err) => {
+    if (M) { $('#notice').hidden = false; $('#notice').textContent = err.message; } else showStartError(err.message);
+  });
+}
 // On the start screen each folder or set of files picked (or dropped) joins a list, and Load reads them
 // all together. Choosing the parent folder brings every folder inside it at once. Once loaded, Add folder,
 // Add files (or a drop) add more and re-read the whole set, in this page's memory only.
@@ -135,10 +161,8 @@ function readFiles(items) {
   worker.postMessage({ files: items });
 }
 const fromInputEl = (fl) => [...(fl || [])].map((f) => ({ file: f, path: f.webkitRelativePath || f.name }));
-$('#folderInput').addEventListener('change', (e) => { stage(fromInputEl(e.target.files)); e.target.value = ''; });
-$('#filesInput').addEventListener('change', (e) => { stage(fromInputEl(e.target.files)); e.target.value = ''; });
-$('#addFolderInput').addEventListener('change', (e) => { addItems(fromInputEl(e.target.files)); e.target.value = ''; });
-$('#addFilesInput').addEventListener('change', (e) => { addItems(fromInputEl(e.target.files)); e.target.value = ''; });
+for (const id of ['folderInput', 'filesInput', 'addFolderInput', 'addFilesInput'])
+  $('#' + id).addEventListener('change', (e) => { take(fromInputEl(e.target.files)); e.target.value = ''; });
 $('#cancelBtn').addEventListener('click', () => {
   if (worker) { worker.terminate(); worker = null; }
   if (!M) { PENDING = new Map(LOADED); renderPending(); }   // back to the list, ready to load again
@@ -166,7 +190,7 @@ document.addEventListener('dragover', (e) => e.preventDefault());
 document.addEventListener('drop', (e) => {
   e.preventDefault(); dragDepth = 0; document.body.classList.remove('dragging');
   if (worker || !e.dataTransfer) return;
-  dropItems(e.dataTransfer).then((items) => (M ? addItems(items) : stage(items)), (err) => showStartError('Those folders could not be opened: ' + err.message));
+  dropItems(e.dataTransfer).then(take, (err) => showStartError('Those folders could not be opened: ' + err.message));
 });
 
 // ---------- multi-select list ----------

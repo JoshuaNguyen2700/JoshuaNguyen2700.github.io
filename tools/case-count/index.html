@@ -33,8 +33,8 @@
         <label class="link" for="filesInput">Add files</label>
       </div>
     </div>
-    <p class="cc-hint">Pick as many folders and files as you like; they all load together. Choose <b>Cview Report</b> itself to bring in every folder inside it in one go, or select several files at once with Ctrl+click.</p>
-    <div class="cc-drop" id="drop">or drag folders and files here, as many as you like.</div>
+    <p class="cc-hint">Pick as many folders and files as you like; they all load together. Choose <b>Cview Report</b> itself to bring in every folder inside it in one go, or select several files at once with Ctrl+click. Zipped folders (.zip) work too.</p>
+    <div class="cc-drop" id="drop">or drag folders, files and .zip files here, as many as you like.</div>
     <p class="cc-privacy">Your files stay on this computer. The browser reads them directly and nothing is sent anywhere.</p>
     <p class="cc-error" id="startError" role="alert" hidden></p>
   </section>
@@ -47,9 +47,9 @@
     <button class="cc-linkbtn" id="cancelBtn" type="button">Cancel</button>
   </section>
   <input type="file" id="folderInput" webkitdirectory multiple hidden>
-  <input type="file" id="filesInput" accept=".xls,.xlsx,.xlsm,.csv" multiple hidden>
+  <input type="file" id="filesInput" accept=".xls,.xlsx,.xlsm,.csv,.zip" multiple hidden>
   <input type="file" id="addFolderInput" webkitdirectory multiple hidden>
-  <input type="file" id="addFilesInput" accept=".xls,.xlsx,.xlsm,.csv" multiple hidden>
+  <input type="file" id="addFilesInput" accept=".xls,.xlsx,.xlsm,.csv,.zip" multiple hidden>
 
   <div class="cc" id="app" hidden>
     <header class="cc-head">
