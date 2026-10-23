@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Station Actions · Joshua Nguyen</title>
+<meta name="description" content="The action cards of the Power BI Station / Customer Dashboard (NSR's past due, B2C OHD without APPSET, past appointments, return needed, unable to contact, Beyonds showing OFD) as daily counts, trends and HAWB lists, from the daily Power Automate export. Files stay on your computer.">
+<!-- Shared bus: absolute paths. This tool's own files: relative paths. -->
+<link rel="stylesheet" href="/assets/bus.css">
+<script src="/assets/core/theme.js"></script>
+<link rel="stylesheet" href="tool.css">
+</head>
+<body>
+<header data-shell="nav"></header>
+
+<main>
+  <!-- Shown until files are opened. No shipment data is ever stored in this website. -->
+  <section class="hero sa-start" id="start">
+    <div class="eyebrow">Upload your daily exports</div>
+    <h1>Station Actions</h1>
+    <p>The action cards from the Power BI Station / Customer Dashboard, one file per day from the Power Automate flow. Choose the <b>Station Dashboard</b> folder in OneDrive (Power BI Exports) to see today's numbers, what changed since the day before and the trend.</p>
+    <div class="actions">
+      <label class="btn" for="folderInput">Choose the folder</label>
+      <label class="btn sa-btn-alt" for="filesInput">Choose files</label>
+    </div>
+    <div class="sa-drop">or drag the folder or the .csv files here.</div>
+    <p class="sa-privacy">Your files stay on this computer. The browser reads them directly and nothing is sent anywhere.</p>
+    <p class="sa-error" id="startError" role="alert" hidden></p>
+  </section>
+  <input type="file" id="folderInput" webkitdirectory multiple hidden>
+  <input type="file" id="filesInput" accept=".csv" multiple hidden>
+
+  <div class="sa" id="app" hidden>
+    <header class="sa-head">
+      <div>
+        <div class="eyebrow">Power BI · Station_Dashboard</div>
+        <h1>Station Actions</h1>
+        <div class="sa-range" id="range"></div>
+      </div>
+      <div class="sa-meta">
+        <div class="field"><label for="snap">Day</label><select id="snap"></select></div>
+        <div class="sa-meta-actions">
+          <button class="sa-btn sa-btn-primary" id="exportBtn" type="button" title="Download the numbers and HAWB lists for the current filters as an Excel workbook">Export to Excel</button>
+          <label class="sa-btn" for="filesInput" title="Add more daily files to what's loaded">Add files</label>
+          <button class="sa-linkbtn" id="closeBtn" type="button" title="Clear everything and start again">Start over</button>
+        </div>
+      </div>
+    </header>
+    <p class="sa-banner" role="note"><span><b>Data is not saved.</b> Refreshing or closing this page clears it; choose the folder again to bring it back.</span></p>
+    <p class="sa-notice" id="notice" role="alert" hidden></p>
+
+    <!-- Filters apply to everything below. Nothing ticked = all. -->
+    <section class="sa-filters" aria-label="Filters">
+      <div class="field"><label>Destination station</label><div class="ms" id="msStn"></div></div>
+      <div class="field"><label>Customer</label><div class="ms" id="msCust"></div></div>
+      <div class="field"><label>Division</label><div class="ms" id="msDiv"></div></div>
+      <div class="field"><label>Product</label><div class="ms" id="msProd"></div></div>
+      <button class="sa-linkbtn" id="resetBtn" type="button">Reset filters</button>
+    </section>
+
+    <!-- One tile per Power BI card; the selected one drives the chart, bars and HAWB list -->
+    <div class="kpis" id="kpis" role="group" aria-label="Cards"></div>
+
+    <div class="card">
+      <div class="card-h"><h2 id="trendTitle">Trend</h2><span class="sub" id="trendSub"></span></div>
+      <div class="chart" id="trend"></div>
+    </div>
+
+    <div class="grid2">
+      <div class="card">
+        <div class="card-h"><h2>By destination station</h2><span class="sub">click a station to filter to it</span></div>
+        <div class="bars" id="byStn"></div>
+      </div>
+      <div class="card">
+        <div class="card-h"><h2>By customer</h2><span class="sub">click a customer to filter to it</span></div>
+        <div class="bars" id="byCust"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-h"><h2>Stations × cards</h2><span class="sub" id="mxSub"></span><button class="sa-linkbtn copybtn" type="button" data-copy="#matrix" title="Copy this table, then paste into Excel">Copy</button></div>
+      <div class="tscroll" id="matrix"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-h">
+        <h2 id="listTitle">HAWBs</h2><span class="sub" id="listSub"></span>
+        <div class="tools">
+          <input type="search" id="q" placeholder="Search HAWB, customer, consignee, notes" aria-label="Search the HAWB list">
+          <label class="sa-check"><input type="checkbox" id="newOnly"><span id="newOnlyLabel">New since the day before only</span></label>
+          <button class="sa-linkbtn copybtn" type="button" data-copy="#list" title="Copy this table, then paste into Excel">Copy</button>
+        </div>
+      </div>
+      <div class="tscroll tall" id="list"></div>
+      <div class="more" id="moreWrap" hidden><button class="sa-btn" id="more" type="button">Show 200 more</button></div>
+    </div>
+
+    <div class="card">
+      <div class="card-h"><h2>Files loaded</h2><span class="sub">one per day; the day comes from the date in the file name</span></div>
+      <div class="tscroll" id="files"></div>
+    </div>
+  </div>
+</main>
+<div id="tip" hidden></div>
+
+<script type="module" src="/assets/core/shell.js"></script>
+<script type="module" src="tool.js"></script>
+</body>
+</html>

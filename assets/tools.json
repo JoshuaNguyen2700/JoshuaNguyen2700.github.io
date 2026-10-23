@@ -30,11 +30,11 @@
       "icon": "chart"
     },
     {
-      "id": "tool-6",
-      "name": "Tool 6",
-      "blurb": "A new tool is on the way.",
-      "status": "soon",
-      "icon": "plus"
+      "id": "station-actions",
+      "name": "Station Actions",
+      "blurb": "NSR past due · B2C appointments · Beyonds",
+      "status": "live",
+      "icon": "chart"
     }
   ]
 }
