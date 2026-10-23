@@ -6,6 +6,7 @@
 // Every day's file is kept small (card, HAWB and the filter columns) for the counts and the trend; only the
 // day on screen is read in full, for the HAWB list and the export.
 import { esc } from '/assets/core/util.js';
+import { unzip } from '/assets/core/unzip.js';
 
 const $ = (s) => document.querySelector(s);
 const DAY = 864e5;
@@ -76,7 +77,7 @@ function fileDay(file) {
 async function readSnap(file) {
   const t = await readTable(file);
   if (t.col.KPI == null || t.col.HAWB == null) return { skip: 'not a Station Dashboard export (no KPI and HAWB columns)' };
-  const s = { day: fileDay(file), name: file.webkitRelativePath || file.name, file, rows: t.rows.length,
+  const s = { day: fileDay(file), name: file.sourcePath || file.webkitRelativePath || file.name, file, rows: t.rows.length,
     k: new Int8Array(t.rows.length), hawb: [], stn: [], cust: [], div: [], prod: [], totals: KPIS.map(() => null), counts: KPIS.map(() => 0), unknown: 0 };
   const ix = DIMS.map(([, c]) => t.col[c]);
   t.rows.forEach((r, i) => {
@@ -94,7 +95,30 @@ async function readSnap(file) {
 
 // ---------- loading ----------
 function showStartError(msg) { const e = $('#startError'); e.textContent = msg; e.hidden = !msg; }
-const NO_FILES = 'No .csv or .xlsx files there. Choose the Customer_Station report folder (Customer Service Center-Josh Test SharePoint), or the daily files in it.';
+const NO_FILES = 'No .csv or .xlsx files there. Choose the Customer_Station report folder (Customer Service Center-Josh Test SharePoint), the daily files in it, or a .zip of them.';
+// A .zip counts as a folder named after it; zips inside zips are opened too. Each file inside remembers
+// where it came from ("Week 43.zip/Station Dashboard Actions 2026-10-23.csv") for the list and the Files table.
+const ZIP = /\.zip$/i;
+async function expandZips(files, depth = 0) {
+  const out = [];
+  for (const f of files) {
+    if (!ZIP.test(f.name) || depth > 3) { out.push(f); continue; }
+    let inner;
+    try { inner = await unzip(f); } catch (err) { throw new Error(`${f.name} could not be opened: ${err.message}.`); }
+    const folder = (f.sourcePath || f.webkitRelativePath || f.name).replace(ZIP, ''), base = folder.split('/').pop();
+    // a zip made from a folder of the same name ("Week 43.zip" holding "Week 43/...") doesn't repeat it
+    const same = inner.length && inner.every((x) => x.name.toLowerCase().startsWith(base.toLowerCase() + '/'));
+    for (const x of inner) x.file.sourcePath = folder + '/' + (same ? x.name.slice(base.length + 1) : x.name);
+    out.push(...await expandZips(inner.map((x) => x.file), depth + 1));
+  }
+  return out;
+}
+// Folders, files and zips picked or dropped all come through here
+function take(files, now) {
+  const go = (fs) => (now ? loadFiles(fs) : stage(fs));
+  if (!files.some((f) => ZIP.test(f.name))) { go(files); return; }
+  expandZips(files).then(go, (err) => (now ? note(err.message) : showStartError(err.message)));
+}
 const usable = (files) => files.filter((f) => TABLE.test(f.name) && !/^~\$/.test(f.name));
 async function loadFiles(files) {
   files = usable(files);
@@ -441,7 +465,7 @@ $('#exportBtn').addEventListener('click', async () => {
 // together. Once loaded, Add folder / Add files (or a drop) add more straight away. The same file twice counts once.
 const fromInput = (fl) => [...(fl || [])];
 const fileKey = (f) => `${f.name}|${f.size}|${f.lastModified}`;
-const topFolder = (f) => { const p = (f.webkitRelativePath || '').split('/'); return p.length > 1 ? p[0] : 'Files you picked'; };
+const topFolder = (f) => { const p = (f.sourcePath || f.webkitRelativePath || '').split('/'); return p.length > 1 ? p[0] : 'Files you picked'; };
 let PENDING = new Map();
 function stage(files) {
   files = usable(files);
@@ -471,8 +495,8 @@ $('#loadBtn').addEventListener('click', async () => {
   if (SNAPS.length) PENDING = new Map();
   renderPending();
 });
-for (const id of ['folderInput', 'filesInput']) $('#' + id).addEventListener('change', (e) => { stage(fromInput(e.target.files)); e.target.value = ''; });
-for (const id of ['addFolderInput', 'addFilesInput']) $('#' + id).addEventListener('change', (e) => { loadFiles(fromInput(e.target.files)); e.target.value = ''; });
+for (const id of ['folderInput', 'filesInput']) $('#' + id).addEventListener('change', (e) => { take(fromInput(e.target.files), false); e.target.value = ''; });
+for (const id of ['addFolderInput', 'addFilesInput']) $('#' + id).addEventListener('change', (e) => { take(fromInput(e.target.files), true); e.target.value = ''; });
 $('#closeBtn').addEventListener('click', () => {
   SNAPS = []; FULL = null; PREV = null; cur = -1; for (const [key] of DIMS) F[key].clear();
   PENDING = new Map(); renderPending();
@@ -496,7 +520,7 @@ document.addEventListener('dragleave', () => { if (--dragDepth <= 0) { dragDepth
 document.addEventListener('dragover', (e) => e.preventDefault());
 document.addEventListener('drop', (e) => {
   e.preventDefault(); dragDepth = 0; document.body.classList.remove('dragging');
-  if (e.dataTransfer) dropFiles(e.dataTransfer).then((fs) => (SNAPS.length ? loadFiles(fs) : stage(fs)), (err) => showStartError('Those files could not be opened: ' + err.message));
+  if (e.dataTransfer) dropFiles(e.dataTransfer).then((fs) => take(fs, SNAPS.length > 0), (err) => showStartError('Those files could not be opened: ' + err.message));
 });
 let rT = 0;
 addEventListener('resize', () => { clearTimeout(rT); rT = setTimeout(() => { if (cur >= 0) { const series = SNAPS.map(countsOf); renderKpis(series); renderTrend(series); } }, 150); });

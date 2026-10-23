@@ -32,15 +32,15 @@
         <label class="link" for="filesInput">Add files</label>
       </div>
     </div>
-    <p class="sa-hint">Pick as many folders and files as you like; they all load together. Select several files at once with Ctrl+click. One file per day: .csv from the flow, or .xlsx if you saved one in Excel.</p>
-    <div class="sa-drop">or drag folders and files here, as many as you like.</div>
+    <p class="sa-hint">Pick as many folders and files as you like; they all load together. Select several files at once with Ctrl+click. One file per day: .csv from the flow, or .xlsx if you saved one in Excel. Zipped folders (.zip) work too.</p>
+    <div class="sa-drop">or drag folders, files and .zip files here, as many as you like.</div>
     <p class="sa-privacy">Your files stay on this computer. The browser reads them directly and nothing is sent anywhere.</p>
     <p class="sa-error" id="startError" role="alert" hidden></p>
   </section>
   <input type="file" id="folderInput" webkitdirectory multiple hidden>
-  <input type="file" id="filesInput" accept=".csv,.xlsx,.xls" multiple hidden>
+  <input type="file" id="filesInput" accept=".csv,.xlsx,.xls,.zip" multiple hidden>
   <input type="file" id="addFolderInput" webkitdirectory multiple hidden>
-  <input type="file" id="addFilesInput" accept=".csv,.xlsx,.xls" multiple hidden>
+  <input type="file" id="addFilesInput" accept=".csv,.xlsx,.xls,.zip" multiple hidden>
 
   <div class="sa" id="app" hidden>
     <header class="sa-head">
