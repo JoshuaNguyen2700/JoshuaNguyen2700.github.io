@@ -133,6 +133,7 @@
 .otp .ktile .tile-sel option{text-transform:none;letter-spacing:0;color:var(--text);background:var(--o-raised)}
 .ktile .v{font-size:28px;font-weight:600;letter-spacing:-.02em;line-height:1.1}
 .ktile .v.neg{color:var(--crit)}
+.ktile .v.pos{color:var(--good)}
 .ktile .d{font-size:13px;color:var(--muted)}
 .ktile.proj{background:transparent;border:1px dashed var(--o-axis)}
 .ktile.proj .v{color:var(--o-ink2)}

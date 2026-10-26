@@ -692,10 +692,10 @@ function revBreakdown() {
 function revTiles(groups, by) {
   const t = sumGroups(groups), loss = groups.filter((o) => o.net < 0), prof = groups.filter((o) => o.net > 0);
   const lossNet = loss.reduce((s, o) => s + o.net, 0), profNet = prof.reduce((s, o) => s + o.net, 0);
-  const tile = (label, v, d, neg) => `<div class="ktile"><div class="eyebrow">${label}</div><div class="v${neg ? ' neg' : ''}">${v}</div>${d ? `<div class="d">${d}</div>` : ''}</div>`;
+  const tile = (label, v, d, neg, pos) => `<div class="ktile"><div class="eyebrow">${label}</div><div class="v${neg ? ' neg' : pos ? ' pos' : ''}">${v}</div>${d ? `<div class="d">${d}</div>` : ''}</div>`;
   $('#revTiles').innerHTML =
     tile('Net', fmt$c(t.net), `${t.rev ? fmtP(t.margin) + ' margin · ' : ''}${fmt$(t.perH)} per HAWB`, t.net < 0) +
-    tile('Gross revenue', fmt$c(t.rev), 'on delivered HAWBs') +
+    tile('Gross revenue', fmt$c(t.rev), 'on delivered HAWBs', false, t.rev > 0) +
     tile('Gross expense', fmt$c(-t.exp), 'on delivered HAWBs', t.exp > 0) +
     tile(`${by.many} losing money`, `${fmtN(loss.length)} of ${fmtN(groups.length)}`, `${fmt$c(lossNet)} net between them`, loss.length > 0) +
     tile(`${by.many} profitable`, `${fmtN(prof.length)} of ${fmtN(groups.length)}`, `${fmt$c(profNet)} net between them`) +
@@ -811,7 +811,7 @@ function moneyTile(t) {
   const head = DATA.hasExp ? `<select id="moneySel" class="tile-sel eyebrow" aria-label="Money figure">${Object.keys(MONEY).map(opt).join('')}</select>`
     : `<div class="eyebrow" title="This data file has no expense; load the Excel files again to see expense and net">${MONEY.gross.label}</div>`;
   const v = money().of(t);
-  return `<div class="ktile">${head}<div class="v${v < 0 ? ' neg' : ''}">${fmt$c(v)}</div><div class="d">${moneyNote(t)}</div></div>`;
+  return `<div class="ktile">${head}<div class="v${v < 0 ? ' neg' : k === 'gross' && v > 0 ? ' pos' : ''}">${fmt$c(v)}</div><div class="d">${moneyNote(t)}</div></div>`;
 }
 
 function tiles() {
