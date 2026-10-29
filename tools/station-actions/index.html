@@ -32,7 +32,7 @@
         <label class="link" for="filesInput">Add files</label>
       </div>
     </div>
-    <p class="sa-hint">Pick as many folders and files as you like; they all load together. Select several files at once with Ctrl+click. One file per day: .csv from the flow, or .xlsx if you saved one in Excel. Zipped folders (.zip) work too.</p>
+    <p class="sa-hint">Pick as many folders and files as you like; they all load together. Select several files at once with Ctrl+click. One file per day: .csv from the flow, or .xlsx if you saved one in Excel. Zipped folders (.zip) work too. The <b>Customer Teams</b> file in the same folder groups customers by CS team.</p>
     <div class="sa-drop">or drag folders, files and .zip files here, as many as you like.</div>
     <p class="sa-privacy">Your files stay on this computer. The browser reads them directly and nothing is sent anywhere.</p>
     <p class="sa-error" id="startError" role="alert" hidden></p>
@@ -64,6 +64,13 @@
 
     <!-- Filters apply to everything below. Nothing ticked = all. -->
     <section class="sa-filters" aria-label="Filters">
+      <!-- Day range: the days of the files loaded. Limits the trend, the Day list and the Files table. -->
+      <div class="sa-days" id="dayRange">
+        <div class="field"><label for="from">From</label><select id="from"></select></div>
+        <div class="field"><label for="to">To</label><select id="to"></select></div>
+        <div class="sa-presets" id="presets"><button class="sa-linkbtn" type="button" data-last="7">Last 7</button><button class="sa-linkbtn" type="button" data-last="30">Last 30</button><button class="sa-linkbtn" type="button" data-last="0">All days</button></div>
+      </div>
+      <div class="field"><label>CS team</label><div class="ms" id="msTeam"></div></div>
       <div class="field"><label>Destination station</label><div class="ms" id="msStn"></div></div>
       <div class="field"><label>Customer</label><div class="ms" id="msCust"></div></div>
       <div class="field"><label>Division</label><div class="ms" id="msDiv"></div></div>
@@ -77,6 +84,14 @@
     <div class="card">
       <div class="card-h"><h2 id="trendTitle">Trend</h2><span class="sub" id="trendSub"></span></div>
       <div class="chart" id="trend"></div>
+    </div>
+
+    <!-- CS teams (OTP Dash groups, from the Customer Teams file), each opening to its customers -->
+    <div class="card">
+      <div class="card-h"><h2>By CS team</h2><span class="sub" id="teamSub"></span>
+        <div class="tools"><button class="sa-linkbtn" id="teamAll" type="button">Expand all</button><button class="sa-linkbtn copybtn" type="button" data-copy="#teams" title="Copy this table, then paste into Excel">Copy</button></div>
+      </div>
+      <div class="tscroll" id="teams"></div>
     </div>
 
     <div class="grid2">
@@ -100,6 +115,12 @@
         <h2 id="listTitle">HAWBs</h2><span class="sub" id="listSub"></span>
         <div class="tools">
           <input type="search" id="q" placeholder="Search HAWB, customer, consignee, notes" aria-label="Search the HAWB list">
+          <!-- Date range on one of the list's date columns; blank From or To = open-ended -->
+          <div class="sa-dates" id="dates">
+            <select id="dField" aria-label="Date to filter on"><option value="Date Shipped">Shipped</option><option value="Due Date" selected>Due</option><option value="Appointment Delivery Date">Appt date</option></select>
+            <input type="date" id="dFrom" aria-label="From date"><span>to</span><input type="date" id="dTo" aria-label="To date">
+            <button class="sa-linkbtn" id="dClear" type="button" hidden>Clear dates</button>
+          </div>
           <label class="sa-check"><input type="checkbox" id="newOnly"><span id="newOnlyLabel">New since the day before only</span></label>
           <button class="sa-linkbtn copybtn" type="button" data-copy="#list" title="Copy this table, then paste into Excel">Copy</button>
         </div>
@@ -109,7 +130,7 @@
     </div>
 
     <div class="card">
-      <div class="card-h"><h2>Files loaded</h2><span class="sub">one per day; the day comes from the date in the file name</span></div>
+      <div class="card-h"><h2>Files loaded</h2><span class="sub" id="filesSub"></span></div>
       <div class="tscroll" id="files"></div>
     </div>
   </div>
